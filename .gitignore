@@ -7,6 +7,9 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+node_modules/
+frontend/node_modules/
+frontend/.vite/
 
 *.sqlite3
 *.db

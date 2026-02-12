@@ -1,0 +1,37 @@
+{
+  "categories": [
+    {
+      "id": "coding",
+      "label": "Coding",
+      "color": "#2dd4bf",
+      "apps": ["code", "cursor", "pycharm", "idea"],
+      "domains": ["github.com", "gitlab.com", "readthedocs.io"],
+      "titles": ["pull request", "merge request", "commit"]
+    },
+    {
+      "id": "communication",
+      "label": "Communication",
+      "color": "#38bdf8",
+      "apps": ["slack", "discord", "telegram", "signal", "thunderbird"],
+      "domains": ["slack.com", "discord.com", "mail.google.com"]
+    },
+    {
+      "id": "uni",
+      "label": "Uni",
+      "color": "#facc15",
+      "domains": ["kit.edu", "campus.kit.edu", "ilias", "moodle"],
+      "titles": ["vorlesung", "ubung", "klausur", "praktikum", "tutorium"]
+    },
+    {
+      "id": "research",
+      "label": "Research",
+      "color": "#22c55e",
+      "domains": ["wikipedia.org", "arxiv.org", "docs.python.org"]
+    },
+    {
+      "id": "other",
+      "label": "Other",
+      "color": "rgba(255,255,255,.45)"
+    }
+  ]
+}

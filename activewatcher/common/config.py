@@ -21,6 +21,13 @@ def default_db_path() -> Path:
     return default_data_dir() / "events.sqlite3"
 
 
+def default_categories_path() -> Path:
+    raw = os.environ.get("ACTIVEWATCHER_CATEGORIES_PATH")
+    if raw:
+        return Path(raw)
+    return default_data_dir() / "categories.json"
+
+
 def default_server_url() -> str:
     return os.environ.get("ACTIVEWATCHER_SERVER_URL", "http://127.0.0.1:8712")
 

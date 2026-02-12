@@ -59,6 +59,39 @@ Web UI:
 - `http://127.0.0.1:8712/ui`
 - `http://127.0.0.1:8712/ui/stats` (includes detailed logs)
 - Includes a GitHub-style daily heatmap ("Calendar") with app filtering.
+- Legacy UI template file: `activewatcher/server/ui.html` (served by `activewatcher/server/ui.py`).
+- Legacy route: `http://127.0.0.1:8712/ui/legacy`
+
+## Frontend (React + Vite)
+
+There is now a separate frontend app in `frontend/` (React + TypeScript + Vite).
+
+Development:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Start backend + frontend together:
+
+```bash
+./scripts/start_backend_frontend.sh
+```
+
+Build for FastAPI serving:
+
+```bash
+cd frontend
+npm run build
+```
+
+Behavior:
+
+- If `frontend/dist/index.html` exists, FastAPI serves the built React app on `/ui` and `/ui/stats`.
+- If no frontend build exists, FastAPI falls back to the legacy UI (`activewatcher/server/ui.html`).
+- You can override the dist folder via `ACTIVEWATCHER_WEB_DIST`.
 
 ## Browser tabs (optional)
 
@@ -74,6 +107,26 @@ Load it as an unpacked extension:
 
 The charts appear on `/ui/stats` under "Browser Tabs" (count timeline, domain share, latest tabs).
 
+## App/Tab categories
+
+`/ui/stats` includes a "Categories" widget that groups:
+
+- Apps (active/window/visible mode)
+- Browser tabs (tab-time by category)
+- Default categories include `Coding`, `Communication`, `Uni`, `Research`, `Ops`, `Media`, `Social`, `Other`.
+
+Rules are loaded from defaults, or from a JSON override file via:
+
+- `ACTIVEWATCHER_CATEGORIES_PATH` (default `~/.local/share/activewatcher/categories.json`)
+
+Example rule file:
+
+- `activewatcher/config/categories.example.json`
+
+API:
+
+- `GET /v1/categories?from=...&to=...&mode=auto|active|window|visible`
+
 ## Hyprland autostart (exec-once)
 
 Example snippet for `hyprland.conf`:
@@ -88,5 +141,6 @@ exec-once = activewatcher watch idle --server-url http://127.0.0.1:8712 --thresh
 
 - `ACTIVEWATCHER_SERVER_URL` (default `http://127.0.0.1:8712`)
 - `ACTIVEWATCHER_DB_PATH` (default `~/.local/share/activewatcher/events.sqlite3`)
+- `ACTIVEWATCHER_CATEGORIES_PATH` (default `~/.local/share/activewatcher/categories.json`)
 - `ACTIVEWATCHER_STALE_AFTER_SECONDS` (default `120`): if a source stops sending updates for longer than this,
   open intervals are treated as ended at their `last_seen_ts` in summaries.

@@ -158,8 +158,10 @@ def _workspace_key(
     workspace_id: int | None,
     monitor: str | None,
     monitor_id: int | None,
+    monitor_count: int | None,
+    monitor_signature: str | None,
 ) -> str:
-    return f"{workspace_id}:{workspace}:{monitor_id}:{monitor}"
+    return f"{workspace_id}:{workspace}:{monitor_id}:{monitor}:{monitor_count}:{monitor_signature}"
 
 
 def _workspace_payload(
@@ -180,6 +182,27 @@ def _workspace_payload(
         if monitor_id is None:
             monitor_id = _monitor_id(mon.get("id"))
 
+    connected_monitors: list[str] | None = None
+    connected_monitor_ids: list[int] | None = None
+    if monitors is not None:
+        monitor_pairs: list[tuple[str, int | None]] = []
+        for m in monitors:
+            if m.get("disabled") is True:
+                continue
+            name = str(m.get("name") or "").strip()
+            if not name:
+                continue
+            monitor_pairs.append((name, _monitor_id(m.get("id"))))
+        monitor_pairs.sort(key=lambda pair: pair[0].lower())
+        connected_monitors = [name for name, _ in monitor_pairs]
+        connected_monitor_ids = [mid for _, mid in monitor_pairs if mid is not None]
+
+    monitor_count = len(connected_monitors) if connected_monitors is not None else None
+    monitor_signature = "|".join(connected_monitors or []) or None
+    monitor_setup: str | None = None
+    if monitor_count is not None and monitor_count > 0:
+        monitor_setup = "multi" if monitor_count >= 2 else "single"
+
     data: dict[str, Any] = {
         "workspace": workspace,
         "workspace_id": workspace_id,
@@ -191,6 +214,11 @@ def _workspace_payload(
         ),
         "monitor": monitor_name,
         "monitor_id": monitor_id,
+        "monitor_count": monitor_count,
+        "monitor_setup": monitor_setup,
+        "connected_monitors": connected_monitors,
+        "connected_monitor_ids": connected_monitor_ids,
+        "monitor_signature": monitor_signature,
     }
 
     if mon:
@@ -228,6 +256,8 @@ def _workspace_payload(
         workspace_id=workspace_id,
         monitor=monitor_name,
         monitor_id=monitor_id,
+        monitor_count=monitor_count,
+        monitor_signature=monitor_signature,
     )
     return data, key
 
@@ -508,6 +538,10 @@ class HyprlandWatcher:
                                 "prev_workspace_id": self._last_workspace_state.get("workspace_id"),
                                 "prev_monitor": self._last_workspace_state.get("monitor"),
                                 "prev_monitor_id": self._last_workspace_state.get("monitor_id"),
+                                "prev_monitor_count": self._last_workspace_state.get("monitor_count"),
+                                "prev_monitor_setup": self._last_workspace_state.get("monitor_setup"),
+                                "prev_connected_monitors": self._last_workspace_state.get("connected_monitors"),
+                                "prev_monitor_signature": self._last_workspace_state.get("monitor_signature"),
                             }
                         )
                 else:
@@ -528,10 +562,22 @@ class HyprlandWatcher:
                         "from_workspace_id": self._last_workspace_state.get("workspace_id"),
                         "from_monitor": self._last_workspace_state.get("monitor"),
                         "from_monitor_id": self._last_workspace_state.get("monitor_id"),
+                        "from_monitor_count": self._last_workspace_state.get("monitor_count"),
+                        "from_monitor_setup": self._last_workspace_state.get("monitor_setup"),
+                        "from_connected_monitors": self._last_workspace_state.get("connected_monitors"),
+                        "from_monitor_signature": self._last_workspace_state.get("monitor_signature"),
                         "to_workspace": workspace_state.get("workspace"),
                         "to_workspace_id": workspace_state.get("workspace_id"),
                         "to_monitor": workspace_state.get("monitor"),
                         "to_monitor_id": workspace_state.get("monitor_id"),
+                        "to_monitor_count": workspace_state.get("monitor_count"),
+                        "to_monitor_setup": workspace_state.get("monitor_setup"),
+                        "to_connected_monitors": workspace_state.get("connected_monitors"),
+                        "to_monitor_signature": workspace_state.get("monitor_signature"),
+                        "monitor_count": workspace_state.get("monitor_count"),
+                        "monitor_setup": workspace_state.get("monitor_setup"),
+                        "connected_monitors": workspace_state.get("connected_monitors"),
+                        "monitor_signature": workspace_state.get("monitor_signature"),
                     }
                     if next_focused_state:
                         switch_payload.update(

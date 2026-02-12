@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from activewatcher.common.models import StateEvent
 from activewatcher.common.time import parse_rfc3339, to_utc, utcnow
 
 from . import db, ingest, reports
-from .ui import UI_HTML
+from .ui import get_ui_html
 
 
 def _parse_dt_param(value: str | None, *, default: datetime) -> datetime:
@@ -22,6 +24,13 @@ def _parse_dt_param(value: str | None, *, default: datetime) -> datetime:
         return to_utc(parse_rfc3339(value))
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"invalid timestamp: {value}") from e
+
+
+def _frontend_dist_dir() -> Path:
+    raw = os.environ.get("ACTIVEWATCHER_WEB_DIST")
+    if raw:
+        return Path(raw)
+    return Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 def create_app(db_path: str | Path) -> FastAPI:
@@ -49,6 +58,14 @@ def create_app(db_path: str | Path) -> FastAPI:
         finally:
             conn.close()
 
+    frontend_dist = _frontend_dist_dir()
+    frontend_index = frontend_dist / "index.html"
+    frontend_assets = frontend_dist / "assets"
+    has_frontend_build = frontend_index.is_file()
+
+    if frontend_assets.is_dir():
+        app.mount("/ui/assets", StaticFiles(directory=frontend_assets), name="ui_assets")
+
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {"status": "ok"}
@@ -61,13 +78,32 @@ def create_app(db_path: str | Path) -> FastAPI:
     def meta() -> dict[str, Any]:
         return {"name": "activewatcher", "health": "/health", "docs": "/docs", "ui": "/ui"}
 
-    @app.get("/ui", response_class=HTMLResponse)
-    def ui() -> str:
-        return UI_HTML
+    def _ui_response():
+        if has_frontend_build:
+            return FileResponse(frontend_index, media_type="text/html")
+        return HTMLResponse(get_ui_html())
 
-    @app.get("/ui/stats", response_class=HTMLResponse)
-    def ui_stats() -> str:
-        return UI_HTML
+    @app.get("/ui")
+    def ui():
+        return _ui_response()
+
+    @app.get("/ui/")
+    def ui_slash():
+        return _ui_response()
+
+    @app.get("/ui/stats")
+    def ui_stats():
+        return _ui_response()
+
+    @app.get("/ui/legacy", response_class=HTMLResponse)
+    def ui_legacy() -> str:
+        return get_ui_html()
+
+    @app.get("/ui/{path:path}")
+    def ui_spa(path: str):
+        if path.startswith("assets/"):
+            raise HTTPException(status_code=404, detail="asset not found")
+        return _ui_response()
 
     @app.post("/v1/state")
     def post_state(state: StateEvent, conn=Depends(_get_conn)) -> dict[str, Any]:
@@ -150,6 +186,21 @@ def create_app(db_path: str | Path) -> FastAPI:
         from_dt = _parse_dt_param(from_ts, default=(to_dt - timedelta(days=365)))
         try:
             return reports.heatmap(conn, from_ts=from_dt, to_ts=to_dt, tz=tz, mode=mode, apps=app)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.get("/v1/categories")
+    def get_categories(
+        from_ts: str | None = Query(None, alias="from"),
+        to_ts: str | None = Query(None, alias="to"),
+        mode: str = Query("auto"),
+        conn=Depends(_get_conn),
+    ) -> dict[str, Any]:
+        now = utcnow()
+        to_dt = _parse_dt_param(to_ts, default=now)
+        from_dt = _parse_dt_param(from_ts, default=(to_dt - timedelta(hours=24)))
+        try:
+            return reports.categories_summary(conn, from_ts=from_dt, to_ts=to_dt, mode=mode)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
 

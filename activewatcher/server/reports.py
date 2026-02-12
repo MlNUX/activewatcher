@@ -5,8 +5,10 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from activewatcher.common.categories import CategoryCatalog, category_catalog
 from activewatcher.common.config import default_stale_after_seconds
 from activewatcher.common.time import parse_rfc3339, to_rfc3339, to_utc, utcnow
 
@@ -646,4 +648,287 @@ def summary(
             afk_ranges=afk_ranges,
             chunk_seconds=chunk_seconds,
         ),
+    }
+
+
+def _add_cat_seconds(totals: dict[str, float], cat: str, seconds: float) -> None:
+    if seconds <= 0:
+        return
+    key = str(cat or "other")
+    totals[key] = totals.get(key, 0.0) + seconds
+
+
+def _add_cat_named_seconds(
+    totals: dict[str, dict[str, float]],
+    *,
+    category: str,
+    name: str,
+    seconds: float,
+) -> None:
+    if seconds <= 0:
+        return
+    cat = str(category or "other")
+    key = str(name or "").strip()
+    if not key:
+        return
+    per_cat = totals.setdefault(cat, {})
+    per_cat[key] = per_cat.get(key, 0.0) + seconds
+
+
+def _top_named_rows(totals: dict[str, float], *, limit: int = 8) -> list[dict[str, Any]]:
+    return [
+        {"name": name, "seconds": round(sec, 3)}
+        for name, sec in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[: max(1, int(limit))]
+        if sec > 0
+    ]
+
+
+def _tab_domain_from_url(raw_url: str) -> str:
+    s = str(raw_url or "").strip()
+    if not s:
+        return "internal"
+    parsed = urlparse(s if "://" in s else f"http://{s}")
+    host = str(parsed.hostname or "").strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host:
+        return host
+    scheme = str(parsed.scheme or "").strip().lower()
+    if scheme and scheme not in ("http", "https"):
+        return scheme
+    return "internal"
+
+
+def _app_category_details_from_segments(
+    catalog: CategoryCatalog, segments: list[TimelineSegment], *, only_active: bool
+) -> dict[str, dict[str, Any]]:
+    apps_by_cat: dict[str, dict[str, float]] = {}
+    titles_by_cat: dict[str, dict[str, float]] = {}
+
+    for seg in segments:
+        if not seg.window:
+            continue
+        if only_active and seg.afk is not False:
+            continue
+        dur = seg.duration_seconds()
+        if dur <= 0:
+            continue
+        app = str(seg.window.get("app") or "")
+        if not app or app.startswith("__"):
+            continue
+        title = str(seg.window.get("title") or "")
+        cat = catalog.classify_app(app=app, title=title)
+        _add_cat_named_seconds(apps_by_cat, category=cat, name=app, seconds=dur)
+        if title:
+            _add_cat_named_seconds(titles_by_cat, category=cat, name=title, seconds=dur)
+
+    out: dict[str, dict[str, Any]] = {}
+    all_cats = set(apps_by_cat) | set(titles_by_cat)
+    for cat in all_cats:
+        out[cat] = {
+            "top_apps": _top_named_rows(apps_by_cat.get(cat, {}), limit=8),
+            "top_titles": _top_named_rows(titles_by_cat.get(cat, {}), limit=8),
+        }
+    return out
+
+
+def _app_category_details_from_intervals(
+    catalog: CategoryCatalog, intervals: list[Interval]
+) -> dict[str, dict[str, Any]]:
+    apps_by_cat: dict[str, dict[str, float]] = {}
+    titles_by_cat: dict[str, dict[str, float]] = {}
+
+    for it in intervals:
+        dur = it.duration_seconds()
+        if dur <= 0:
+            continue
+        app = str(it.data.get("app") or "")
+        if not app or app.startswith("__"):
+            continue
+        title = str(it.data.get("title") or "")
+        cat = catalog.classify_app(app=app, title=title)
+        _add_cat_named_seconds(apps_by_cat, category=cat, name=app, seconds=dur)
+        if title:
+            _add_cat_named_seconds(titles_by_cat, category=cat, name=title, seconds=dur)
+
+    out: dict[str, dict[str, Any]] = {}
+    all_cats = set(apps_by_cat) | set(titles_by_cat)
+    for cat in all_cats:
+        out[cat] = {
+            "top_apps": _top_named_rows(apps_by_cat.get(cat, {}), limit=8),
+            "top_titles": _top_named_rows(titles_by_cat.get(cat, {}), limit=8),
+        }
+    return out
+
+
+def _tabs_category_details(catalog: CategoryCatalog, intervals: list[Interval]) -> dict[str, dict[str, Any]]:
+    domains_by_cat: dict[str, dict[str, float]] = {}
+    titles_by_cat: dict[str, dict[str, float]] = {}
+    browsers_by_cat: dict[str, dict[str, float]] = {}
+
+    for it in intervals:
+        tabs = it.data.get("tabs")
+        if not isinstance(tabs, list) or not tabs:
+            continue
+        dur = it.duration_seconds()
+        if dur <= 0:
+            continue
+        browser = str(it.data.get("browser") or it.source or "browser")
+
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            url = str(tab.get("url") or tab.get("pending_url") or tab.get("pendingUrl") or "")
+            title = str(tab.get("title") or "")
+            cat = catalog.classify_tab(url=url, title=title, app=browser)
+            domain = _tab_domain_from_url(url)
+
+            _add_cat_named_seconds(domains_by_cat, category=cat, name=domain, seconds=dur)
+            _add_cat_named_seconds(browsers_by_cat, category=cat, name=browser, seconds=dur)
+            if title:
+                _add_cat_named_seconds(titles_by_cat, category=cat, name=title, seconds=dur)
+
+    out: dict[str, dict[str, Any]] = {}
+    all_cats = set(domains_by_cat) | set(titles_by_cat) | set(browsers_by_cat)
+    for cat in all_cats:
+        out[cat] = {
+            "top_domains": _top_named_rows(domains_by_cat.get(cat, {}), limit=8),
+            "top_titles": _top_named_rows(titles_by_cat.get(cat, {}), limit=8),
+            "top_browsers": _top_named_rows(browsers_by_cat.get(cat, {}), limit=6),
+        }
+    return out
+
+
+def _category_rows(catalog: CategoryCatalog, totals: dict[str, float]) -> tuple[list[dict[str, Any]], float]:
+    total_seconds = sum(max(0.0, float(v)) for v in totals.values())
+    rows: list[dict[str, Any]] = []
+    for r in catalog.rules:
+        sec = max(0.0, float(totals.get(r.id, 0.0)))
+        if sec <= 0 and total_seconds > 0:
+            continue
+        rows.append(
+            {
+                "category": r.id,
+                "label": r.label,
+                "color": r.color,
+                "seconds": round(sec, 3),
+                "percent": round((sec / total_seconds) * 100.0, 3) if total_seconds > 0 else 0.0,
+            }
+        )
+    if not rows:
+        meta = catalog.category_meta()
+        fallback = meta[-1] if meta else {"id": "other", "label": "Other", "color": "rgba(255,255,255,.45)"}
+        rows = [
+            {
+                "category": fallback["id"],
+                "label": fallback["label"],
+                "color": fallback["color"],
+                "seconds": 0.0,
+                "percent": 0.0,
+            }
+        ]
+    return rows, round(total_seconds, 3)
+
+
+def _app_category_totals_from_segments(
+    catalog: CategoryCatalog, segments: list[TimelineSegment], *, only_active: bool
+) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for seg in segments:
+        if not seg.window:
+            continue
+        if only_active and seg.afk is not False:
+            continue
+        app = str(seg.window.get("app") or "")
+        if not app or app.startswith("__"):
+            continue
+        title = str(seg.window.get("title") or "")
+        cat = catalog.classify_app(app=app, title=title)
+        _add_cat_seconds(totals, cat, seg.duration_seconds())
+    return totals
+
+
+def _app_category_totals_from_intervals(catalog: CategoryCatalog, intervals: list[Interval]) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for it in intervals:
+        app = str(it.data.get("app") or "")
+        if not app or app.startswith("__"):
+            continue
+        title = str(it.data.get("title") or "")
+        cat = catalog.classify_app(app=app, title=title)
+        _add_cat_seconds(totals, cat, it.duration_seconds())
+    return totals
+
+
+def _tabs_category_totals(catalog: CategoryCatalog, intervals: list[Interval]) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for it in intervals:
+        tabs = it.data.get("tabs")
+        if not isinstance(tabs, list) or not tabs:
+            continue
+        browser = str(it.data.get("browser") or it.source or "")
+        dur = it.duration_seconds()
+        if dur <= 0:
+            continue
+        for t in tabs:
+            if not isinstance(t, dict):
+                continue
+            url = str(t.get("url") or t.get("pending_url") or t.get("pendingUrl") or "")
+            title = str(t.get("title") or "")
+            cat = catalog.classify_tab(url=url, title=title, app=browser)
+            _add_cat_seconds(totals, cat, dur)
+    return totals
+
+
+def categories_summary(
+    conn: sqlite3.Connection,
+    *,
+    from_ts: datetime | None,
+    to_ts: datetime | None,
+    mode: str = "auto",
+) -> dict[str, Any]:
+    mode_norm = (mode or "").strip().lower() or "auto"
+    if mode_norm not in ("auto", "active", "window", "visible"):
+        raise ValueError('mode must be one of: "auto", "active", "window", "visible"')
+
+    catalog = category_catalog()
+    app_totals: dict[str, float] = {}
+    app_details: dict[str, dict[str, Any]] = {}
+    app_mode = "window"
+
+    if mode_norm == "visible":
+        from_dt, to_dt, visible = load_intervals(
+            conn, bucket="window_visible", source=None, from_ts=from_ts, to_ts=to_ts
+        )
+        app_mode = "visible"
+        app_totals = _app_category_totals_from_intervals(catalog, visible)
+        app_details = _app_category_details_from_intervals(catalog, visible)
+    else:
+        from_dt, to_dt, window = load_intervals(conn, bucket="window", source=None, from_ts=from_ts, to_ts=to_ts)
+        _, _, idle = load_intervals(conn, bucket="idle", source=None, from_ts=from_dt, to_ts=to_dt)
+        segments = build_timeline(from_dt=from_dt, to_dt=to_dt, window_intervals=window, idle_intervals=idle)
+        use_active = mode_norm == "active" or (mode_norm == "auto" and bool(idle))
+        app_mode = "active" if use_active else "window"
+        app_totals = _app_category_totals_from_segments(catalog, segments, only_active=use_active)
+        app_details = _app_category_details_from_segments(catalog, segments, only_active=use_active)
+
+    _, _, tabs = load_intervals(conn, bucket="browser_tabs", source=None, from_ts=from_dt, to_ts=to_dt)
+    tabs_totals = _tabs_category_totals(catalog, tabs)
+    tab_details = _tabs_category_details(catalog, tabs)
+
+    app_rows, app_total_seconds = _category_rows(catalog, app_totals)
+    tab_rows, tab_total_seconds = _category_rows(catalog, tabs_totals)
+
+    return {
+        "from_ts": to_rfc3339(from_dt),
+        "to_ts": to_rfc3339(to_dt),
+        "mode": app_mode,
+        "catalog_source": catalog.source,
+        "categories": catalog.category_meta(),
+        "apps_total_seconds": app_total_seconds,
+        "tabs_total_seconds": tab_total_seconds,
+        "apps": app_rows,
+        "tabs": tab_rows,
+        "app_details": app_details,
+        "tab_details": tab_details,
     }

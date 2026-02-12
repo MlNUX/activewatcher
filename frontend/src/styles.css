@@ -1,0 +1,1305 @@
+:root {
+  --bg0: #050912;
+  --bg1: #091221;
+  --bg2: #0f1d31;
+  --surface: rgba(255, 255, 255, 0.055);
+  --surface-strong: rgba(255, 255, 255, 0.09);
+  --line: rgba(164, 197, 231, 0.22);
+  --line-strong: rgba(166, 213, 255, 0.36);
+  --ink: rgba(247, 251, 255, 0.95);
+  --muted: rgba(206, 220, 238, 0.72);
+  --muted-soft: rgba(182, 199, 219, 0.54);
+  --ok: #2dd4bf;
+  --warn: #f7b733;
+  --danger: #ff6f5e;
+  --accent: #5ec9ff;
+  --accent-strong: #69f0d5;
+  --shadow-soft: 0 14px 38px rgba(0, 0, 0, 0.28);
+  --shadow-card: 0 12px 30px rgba(0, 0, 0, 0.22);
+  --radius-xl: 18px;
+  --radius-lg: 14px;
+  --radius-md: 11px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.35;
+  font-family: "IBM Plex Sans", "Segoe UI", "Noto Sans", sans-serif;
+  background:
+    radial-gradient(1100px 680px at -10% -10%, rgba(46, 197, 179, 0.28), transparent 62%),
+    radial-gradient(1200px 760px at 110% -8%, rgba(251, 191, 36, 0.2), transparent 56%),
+    radial-gradient(900px 620px at 55% 120%, rgba(72, 138, 255, 0.2), transparent 58%),
+    linear-gradient(170deg, var(--bg0), var(--bg1) 48%, var(--bg2));
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.22;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.75), transparent 95%);
+}
+
+.page {
+  position: relative;
+  width: min(1760px, calc(100% - 28px));
+  margin: 14px auto 48px;
+  display: grid;
+  gap: 14px;
+  z-index: 1;
+}
+
+.header {
+  position: sticky;
+  top: 10px;
+  z-index: 30;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  padding: 12px 14px;
+  backdrop-filter: blur(10px);
+  background: linear-gradient(175deg, rgba(7, 16, 30, 0.84), rgba(15, 27, 42, 0.62));
+  box-shadow: var(--shadow-soft);
+}
+
+.brandLine {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(28px, 3.6vw, 44px);
+  letter-spacing: 0.01em;
+  line-height: 1;
+  font-weight: 680;
+}
+
+h2 {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  font-weight: 620;
+}
+
+h3 {
+  margin: 0 0 9px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.sub {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.controls,
+.navLinks,
+.subnav {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  padding: 8px 12px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 520;
+  cursor: pointer;
+  text-decoration: none;
+  line-height: 1;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 120ms ease;
+}
+
+.pill:hover {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.11);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+
+.pill.active {
+  color: #0a1320;
+  border-color: rgba(125, 255, 235, 0.65);
+  background: linear-gradient(110deg, rgba(113, 240, 219, 0.98), rgba(95, 202, 255, 0.96));
+  box-shadow: 0 0 0 1px rgba(7, 20, 28, 0.26) inset;
+}
+
+.subnav {
+  position: sticky;
+  top: 98px;
+  z-index: 25;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(8, 18, 33, 0.86), rgba(8, 18, 33, 0.64));
+  backdrop-filter: blur(8px);
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+.subnav .pill {
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+  padding: 8px 11px;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(178deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.018));
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  animation: cardIn 220ms ease-out both;
+  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.card:hover {
+  border-color: rgba(146, 204, 255, 0.35);
+}
+
+.cardHd {
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.015));
+}
+
+.cardBd {
+  padding: 13px;
+}
+
+.statusCard {
+  padding: 10px 13px;
+}
+
+.statusLine {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.statusCard.isOk .statusBadge {
+  color: #08231f;
+  border-color: rgba(95, 247, 219, 0.6);
+  background: linear-gradient(120deg, rgba(113, 240, 219, 0.95), rgba(94, 202, 255, 0.95));
+}
+
+.statusCard.isLoading .statusBadge {
+  color: #2f1b03;
+  border-color: rgba(249, 204, 109, 0.65);
+  background: linear-gradient(120deg, rgba(250, 217, 120, 0.97), rgba(255, 177, 83, 0.95));
+}
+
+.statusCard.isError .statusBadge {
+  color: #2a0806;
+  border-color: rgba(255, 138, 126, 0.65);
+  background: linear-gradient(120deg, rgba(255, 150, 138, 0.96), rgba(255, 107, 95, 0.94));
+}
+
+.statusHealthy {
+  color: rgba(145, 244, 224, 0.94);
+}
+
+.statusIssue {
+  color: rgba(255, 165, 155, 0.95);
+}
+
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.kpi {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.03));
+  padding: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.kpi span {
+  color: var(--muted-soft);
+}
+
+.kpi strong {
+  color: #4ff0dc;
+  font-size: clamp(24px, 2.7vw, 33px);
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.split2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 13px;
+}
+
+.dashboardTopRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.32fr) minmax(0, 1fr);
+  gap: 13px;
+  align-items: start;
+}
+
+.empty {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.donutWrap {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  position: relative;
+}
+
+.donut {
+  width: 142px;
+  height: 142px;
+}
+
+.donutRing {
+  stroke: rgba(255, 255, 255, 0.13);
+}
+
+.donutSlice {
+  cursor: pointer;
+  transition: stroke-width 140ms ease, r 140ms ease, filter 140ms ease;
+}
+
+.donutText {
+  fill: rgba(244, 251, 255, 0.94);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 4px;
+}
+
+.legend {
+  display: grid;
+  gap: 6px;
+  min-width: 232px;
+  max-width: 100%;
+}
+
+.legendRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.legendButton {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.legendButton:focus-visible {
+  outline: 1px solid rgba(146, 216, 255, 0.9);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.legendRow.active {
+  background: rgba(94, 201, 255, 0.12);
+  border-radius: 8px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.value {
+  color: var(--muted);
+}
+
+.uiTooltip,
+.donutTooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 2147482600;
+  transform: translate(12px, -50%);
+  min-width: 130px;
+  max-width: min(340px, calc(100vw - 24px));
+  border: 1px solid rgba(184, 226, 255, 0.5);
+  border-radius: 10px;
+  padding: 7px 9px;
+  background: rgba(7, 13, 22, 0.94);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+}
+
+.uiTooltipLabel,
+.donutTooltipLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--ink);
+  margin-bottom: 2px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uiTooltipMeta,
+.donutTooltipMeta {
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chartModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482000;
+  background: rgba(1, 5, 10, 0.66);
+  backdrop-filter: blur(2px);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.chartModal {
+  position: relative;
+  width: min(560px, calc(100vw - 24px));
+  border: 1px solid rgba(173, 220, 255, 0.3);
+  border-radius: 14px;
+  background: linear-gradient(176deg, rgba(9, 20, 34, 0.97), rgba(5, 13, 24, 0.95));
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.44);
+}
+
+.chartModalHd {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 13px;
+  border-bottom: 1px solid rgba(173, 220, 255, 0.16);
+}
+
+.chartModalBd {
+  padding: 13px;
+  display: grid;
+  gap: 12px;
+}
+
+.chartModalTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chartModalTitle strong {
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.chartMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.chartMetric {
+  border: 1px solid rgba(173, 220, 255, 0.2);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.chartMetric span {
+  color: var(--muted-soft);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chartMetric strong {
+  color: var(--ink);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 16px;
+}
+
+.chartProgress {
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(173, 220, 255, 0.28);
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.chartProgressFill {
+  height: 100%;
+}
+
+.chartDetails {
+  display: grid;
+  gap: 9px;
+}
+
+.chartDetailSection {
+  border: 1px solid rgba(173, 220, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 9px;
+  display: grid;
+  gap: 7px;
+}
+
+.chartDetailTitle {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chartDetailList {
+  display: grid;
+  gap: 5px;
+}
+
+.chartDetailRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  border-bottom: 1px dashed rgba(173, 220, 255, 0.2);
+  padding-bottom: 4px;
+}
+
+.chartDetailRow:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.chartDetailLabel {
+  color: var(--ink);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.chartDetailValue {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.chartDetailEmpty {
+  color: var(--muted-soft);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.timelineTopLegacy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.timelineLegendLegacy {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.legendItemLegacy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendDotLegacy {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.timelineInfoLegacy {
+  margin-bottom: 7px;
+}
+
+.timelineWrapLegacy {
+  --timeline-axis: 50px;
+  --timeline-gap: 8px;
+  display: grid;
+  grid-template-columns: var(--timeline-axis) 1fr;
+  gap: var(--timeline-gap);
+  align-items: stretch;
+}
+
+.timelineAxisLegacy {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 126px;
+  padding: 3px 0 0;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.timelineAxisLegacy span {
+  line-height: 1;
+}
+
+.timelinePlotLegacy {
+  position: relative;
+}
+
+.timelineGridLegacy {
+  position: absolute;
+  inset: 4px 2px 0 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.timelineGridLegacy span {
+  display: block;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.timelineAvgLegacy {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-top: 1px dashed rgba(247, 183, 51, 0.85);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.timelinePeakLegacy {
+  position: absolute;
+  top: 4px;
+  bottom: 0;
+  border-left: 1px solid rgba(94, 201, 255, 0.96);
+  pointer-events: none;
+  z-index: 2;
+  transform: translateX(-0.5px);
+}
+
+.timelinePeakLegacy::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(94, 201, 255, 0.98);
+}
+
+.timelineLegacy {
+  display: flex;
+  gap: 4px;
+  align-items: stretch;
+  height: 126px;
+  padding: 4px 2px 0;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+
+.barColLegacy {
+  flex: 1 1 0;
+  min-width: 6px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.075);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column-reverse;
+  position: relative;
+}
+
+.barSegLegacy {
+  width: 100%;
+}
+
+.barSegLegacy.active {
+  background: rgba(45, 212, 191, 0.82);
+}
+
+.barSegLegacy.afkOverlay {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  background: rgba(247, 183, 51, 0.82);
+  mix-blend-mode: screen;
+}
+
+.timelineLabelsLegacy {
+  display: flex;
+  gap: 4px;
+  margin-top: 7px;
+  padding: 0 2px;
+}
+
+.timelinePadLegacy {
+  padding-left: calc(50px + 8px);
+}
+
+.timelineLabelsLegacy span {
+  flex: 1 1 0;
+  min-width: 6px;
+  text-align: center;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.timelineScaleLegacy {
+  margin-top: 7px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.barList {
+  display: grid;
+  gap: 8px;
+}
+
+.workspaceStack {
+  display: grid;
+  gap: 14px;
+}
+
+.wsFilterRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wsFilterLabel {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wsFilterGroup {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.wsFilterMeta {
+  margin-left: auto;
+}
+
+.wsHeatmapWrap {
+  border: 1px solid rgba(166, 213, 255, 0.2);
+  border-radius: 12px;
+  padding: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
+}
+
+.wsHeatmapLegend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.wsHeatmapGradient {
+  width: 118px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(185, 28, 28, 0.35);
+  background: linear-gradient(
+    90deg,
+    #facc15 0%,
+    #f59e0b 35%,
+    #dc2626 68%,
+    #7f1d1d 100%
+  );
+}
+
+.wsHeatmapScroll {
+  overflow-x: auto;
+}
+
+.wsHeatmapGrid {
+  display: grid;
+  gap: 4px 5px;
+  align-items: center;
+  min-width: max-content;
+}
+
+.wsHeatmapCorner {
+  height: 14px;
+}
+
+.wsHeatmapHeader {
+  color: var(--muted-soft);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.wsHeatmapHeaderTotal {
+  text-align: right;
+  padding-right: 2px;
+}
+
+.wsHeatmapRowLabel {
+  color: var(--ink);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wsHeatmapCell {
+  height: 14px;
+  min-width: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(185, 28, 28, 0.22);
+}
+
+.wsHeatmapRowTotal {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.barLabel {
+  color: var(--ink);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.barSub {
+  color: var(--muted-soft);
+  font-size: 11px;
+}
+
+.barTrack {
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.76), rgba(94, 201, 255, 0.94));
+}
+
+.barValue {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  min-width: 92px;
+  text-align: right;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+th,
+td {
+  border-bottom: 1px solid rgba(166, 213, 255, 0.17);
+  text-align: left;
+  padding: 8px 7px;
+  vertical-align: top;
+}
+
+th {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 11px;
+  font-weight: 620;
+}
+
+tbody tr {
+  transition: background 140ms ease;
+}
+
+tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+tbody tr:hover {
+  background: rgba(94, 201, 255, 0.1);
+}
+
+td {
+  color: rgba(235, 245, 255, 0.92);
+}
+
+.wsTransitionTag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.monitorSetupBadge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.monitorSetupBadge.single {
+  background: rgba(45, 212, 191, 0.17);
+  border-color: rgba(45, 212, 191, 0.42);
+  color: rgba(173, 255, 242, 0.98);
+}
+
+.monitorSetupBadge.multi {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.46);
+  color: rgba(255, 221, 163, 0.98);
+}
+
+.monitorSetupBadge.unknown {
+  background: rgba(148, 163, 184, 0.2);
+  border-color: rgba(148, 163, 184, 0.36);
+  color: rgba(227, 232, 240, 0.94);
+}
+
+.monitorCountValue {
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.monitorPeriodMonitors {
+  max-width: 300px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.wsMatrixWrap {
+  border: 1px solid rgba(166, 213, 255, 0.18);
+  border-radius: 12px;
+  padding: 9px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
+}
+
+.wsMatrixNote {
+  margin-bottom: 7px;
+}
+
+.wsMatrixScroll {
+  overflow-x: auto;
+}
+
+.wsMatrixGrid {
+  display: grid;
+  gap: 4px;
+  align-items: center;
+  min-width: max-content;
+}
+
+.wsMatrixCorner,
+.wsMatrixHead,
+.wsMatrixHeadTotal,
+.wsMatrixFooterLabel,
+.wsMatrixFooterTotal {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.wsMatrixCorner {
+  text-align: left;
+  padding-left: 2px;
+}
+
+.wsMatrixHead {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.wsMatrixHeadTotal {
+  text-align: right;
+  padding-right: 2px;
+}
+
+.wsMatrixRowLabel {
+  display: flex;
+  align-items: center;
+}
+
+.wsMatrixCell {
+  min-width: 30px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid rgba(166, 213, 255, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.wsMatrixCell.active {
+  border-color: rgba(255, 246, 202, 0.28);
+}
+
+.wsMatrixCell:hover {
+  filter: brightness(1.09);
+  transform: translateY(-0.5px);
+}
+
+.wsMatrixCellText {
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.wsMatrixCellDot {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(228, 236, 250, 0.22);
+}
+
+.wsMatrixRowTotal,
+.wsMatrixColTotal,
+.wsMatrixFooterTotal {
+  color: var(--ink);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  text-align: right;
+  padding-right: 2px;
+}
+
+.wsMatrixFooterLabel {
+  text-align: left;
+  padding-left: 2px;
+}
+
+.inlineBarTrack {
+  width: clamp(130px, 26vw, 220px);
+  max-width: 100%;
+  height: 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.inlineBarFill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.8), rgba(94, 201, 255, 0.95));
+}
+
+.shareCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inlineBarPct {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+.lineSvg {
+  width: 100%;
+  height: 232px;
+  display: block;
+  border: 1px solid rgba(166, 213, 255, 0.2);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01));
+}
+
+.axis {
+  stroke: rgba(188, 220, 255, 0.25);
+  stroke-width: 1;
+}
+
+.lineArea {
+  fill: rgba(94, 201, 255, 0.17);
+}
+
+.linePath {
+  fill: none;
+  stroke: rgba(94, 201, 255, 0.98);
+  stroke-width: 2;
+}
+
+.linePoint {
+  fill: rgba(152, 228, 255, 0.98);
+  stroke: rgba(8, 13, 20, 0.94);
+  stroke-width: 1;
+}
+
+.lineYLabel,
+.lineXLabel {
+  fill: rgba(221, 236, 255, 0.74);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.page-stats .card {
+  border-radius: 16px;
+}
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1400px) {
+  .page {
+    width: min(100%, calc(100% - 20px));
+  }
+}
+
+@media (max-width: 1200px) {
+  .kpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .split2 {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardTopRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 920px) {
+  .header {
+    position: static;
+    top: auto;
+  }
+
+  .subnav {
+    position: static;
+    top: auto;
+  }
+
+  .cardBd {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .page {
+    width: calc(100% - 12px);
+    margin-top: 8px;
+    gap: 10px;
+  }
+
+  h1 {
+    font-size: 28px;
+  }
+
+  .pill {
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+
+  .kpiGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .kpi strong {
+    font-size: 28px;
+  }
+
+  .timelinePadLegacy {
+    padding-left: calc(42px + 7px);
+  }
+
+  .timelineWrapLegacy {
+    --timeline-axis: 42px;
+    --timeline-gap: 7px;
+  }
+
+  .lineSvg {
+    height: 206px;
+  }
+
+  .wsHeatmapCell {
+    min-width: 12px;
+    height: 12px;
+  }
+
+  .wsMatrixCell {
+    min-width: 26px;
+    height: 23px;
+  }
+
+  .wsTransitionTag {
+    padding: 2px 8px;
+    font-size: 10px;
+  }
+
+  .wsFilterMeta {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .chartModal {
+    max-height: min(88vh, 760px);
+    overflow: auto;
+  }
+
+  .chartMetricGrid {
+    grid-template-columns: 1fr;
+  }
+
+  table {
+    min-width: 620px;
+  }
+}
