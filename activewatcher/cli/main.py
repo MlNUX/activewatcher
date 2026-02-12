@@ -44,6 +44,10 @@ def watch_hyprland(
         False, help="When tracking visible windows, include all monitors (default: focused monitor only)."
     ),
     track_open_apps: bool = typer.Option(False, help="Track all open apps (bucket=app_open)."),
+    track_workspaces: bool = typer.Option(
+        True,
+        help="Track workspace switches (bucket=workspace) and switch events (bucket=workspace_switch).",
+    ),
 ) -> None:
     from activewatcher.watchers import hyprland as hypr_watcher
 
@@ -58,6 +62,7 @@ def watch_hyprland(
             track_visible_windows=track_visible_windows,
             visible_all_monitors=visible_all_monitors,
             track_open_apps=track_open_apps,
+            track_workspaces=track_workspaces,
         )
     )
 

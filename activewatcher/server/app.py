@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from activewatcher.common.models import StateEvent
@@ -25,6 +26,13 @@ def _parse_dt_param(value: str | None, *, default: datetime) -> datetime:
 
 def create_app(db_path: str | Path) -> FastAPI:
     app = FastAPI(title="activewatcher", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.on_event("startup")
     def _startup() -> None:

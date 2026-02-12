@@ -13,6 +13,7 @@ TRACK_FOCUSED="${ACTIVEWATCHER_TRACK_FOCUSED:-1}"
 TRACK_VISIBLE_WINDOWS="${ACTIVEWATCHER_TRACK_VISIBLE_WINDOWS:-1}"
 VISIBLE_ALL_MONITORS="${ACTIVEWATCHER_VISIBLE_ALL_MONITORS:-0}"
 TRACK_OPEN_APPS="${ACTIVEWATCHER_TRACK_OPEN_APPS:-1}"
+TRACK_WORKSPACES="${ACTIVEWATCHER_TRACK_WORKSPACES:-1}"
 
 if command -v activewatcher >/dev/null 2>&1; then
   AW=(activewatcher)
@@ -58,6 +59,7 @@ if [[ "${TRACK_FOCUSED}" == "1" ]]; then hypr_args+=(--track-focused); else hypr
 if [[ "${TRACK_VISIBLE_WINDOWS}" == "1" ]]; then hypr_args+=(--track-visible-windows); else hypr_args+=(--no-track-visible-windows); fi
 if [[ "${VISIBLE_ALL_MONITORS}" == "1" ]]; then hypr_args+=(--visible-all-monitors); else hypr_args+=(--no-visible-all-monitors); fi
 if [[ "${TRACK_OPEN_APPS}" == "1" ]]; then hypr_args+=(--track-open-apps); else hypr_args+=(--no-track-open-apps); fi
+if [[ "${TRACK_WORKSPACES}" == "1" ]]; then hypr_args+=(--track-workspaces); else hypr_args+=(--no-track-workspaces); fi
 
 echo "[activewatcher] starting hyprland watcher (${hypr_args[*]})"
 "${AW[@]}" watch hyprland --server-url "${SERVER_URL}" "${hypr_args[@]}" &
@@ -70,4 +72,3 @@ pids+=("$!")
 echo "[activewatcher] running (Ctrl-C to stop)"
 wait -n "${pids[@]}"
 exit 1
-

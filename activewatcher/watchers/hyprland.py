@@ -6,7 +6,7 @@ import os
 import pathlib
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from activewatcher.common.http import ActiveWatcherAsyncClient
@@ -131,6 +131,105 @@ def _monitor_id(value: Any) -> int | None:
     if isinstance(value, str) and value.isdigit():
         return int(value)
     return None
+
+
+def _pick_monitor(
+    monitors: list[dict[str, Any]] | None,
+    *,
+    monitor_name: str | None,
+    monitor_id: int | None,
+) -> dict[str, Any] | None:
+    if not monitors:
+        return None
+    if monitor_id is not None:
+        mon = next((m for m in monitors if _monitor_id(m.get("id")) == monitor_id), None)
+        if mon:
+            return mon
+    if monitor_name:
+        mon = next((m for m in monitors if str(m.get("name") or "") == monitor_name), None)
+        if mon:
+            return mon
+    return _pick_focused_monitor(monitors)
+
+
+def _workspace_key(
+    *,
+    workspace: str | None,
+    workspace_id: int | None,
+    monitor: str | None,
+    monitor_id: int | None,
+) -> str:
+    return f"{workspace_id}:{workspace}:{monitor_id}:{monitor}"
+
+
+def _workspace_payload(
+    *,
+    active_ws: dict[str, Any],
+    monitors: list[dict[str, Any]] | None,
+    title_max_len: int,
+    focused_state: dict[str, Any] | None,
+) -> tuple[dict[str, Any], str]:
+    workspace = _ws_label(active_ws)
+    workspace_id = _ws_id(active_ws)
+
+    monitor_name = str(active_ws.get("monitor") or "") or None
+    monitor_id = _monitor_id(active_ws.get("monitorID")) or _monitor_id(active_ws.get("monitor"))
+    mon = _pick_monitor(monitors, monitor_name=monitor_name, monitor_id=monitor_id)
+    if mon:
+        monitor_name = monitor_name or str(mon.get("name") or "") or None
+        if monitor_id is None:
+            monitor_id = _monitor_id(mon.get("id"))
+
+    data: dict[str, Any] = {
+        "workspace": workspace,
+        "workspace_id": workspace_id,
+        "workspace_windows": active_ws.get("windows"),
+        "workspace_has_fullscreen": active_ws.get("hasfullscreen"),
+        "workspace_last_window": active_ws.get("lastwindow"),
+        "workspace_last_window_title": _truncate_title(
+            str(active_ws.get("lastwindowtitle") or ""), title_max_len
+        ),
+        "monitor": monitor_name,
+        "monitor_id": monitor_id,
+    }
+
+    if mon:
+        data.update(
+            {
+                "monitor_make": mon.get("make"),
+                "monitor_model": mon.get("model"),
+                "monitor_serial": mon.get("serial"),
+                "monitor_description": mon.get("description"),
+                "monitor_x": mon.get("x"),
+                "monitor_y": mon.get("y"),
+                "monitor_width": mon.get("width"),
+                "monitor_height": mon.get("height"),
+                "monitor_scale": mon.get("scale"),
+                "monitor_refresh": mon.get("refreshRate"),
+                "monitor_transform": mon.get("transform"),
+                "monitor_focused": bool(mon.get("focused")),
+            }
+        )
+
+    if focused_state:
+        data.update(
+            {
+                "focused_app": focused_state.get("app"),
+                "focused_title": focused_state.get("title"),
+                "focused_workspace": focused_state.get("workspace"),
+                "focused_monitor": focused_state.get("monitor"),
+                "focused_xwayland": focused_state.get("xwayland"),
+                "focused_no_focus": focused_state.get("no_focus"),
+            }
+        )
+
+    key = _workspace_key(
+        workspace=workspace,
+        workspace_id=workspace_id,
+        monitor=monitor_name,
+        monitor_id=monitor_id,
+    )
+    return data, key
 
 
 async def _get_focused_state(
@@ -261,6 +360,7 @@ class HyprlandWatcher:
     track_visible_windows: bool
     visible_all_monitors: bool
     track_open_apps: bool
+    track_workspaces: bool
 
     def __post_init__(self) -> None:
         self._pending: asyncio.Task | None = None
@@ -274,6 +374,10 @@ class HyprlandWatcher:
 
         self._open_apps_sent: set[str] = set()
         self._last_open_apps_sent_at: float = 0.0
+
+        self._last_workspace_state: dict[str, Any] | None = None
+        self._last_workspace_key: str | None = None
+        self._last_workspace_sent_at: float = 0.0
 
     def set_socket1_path(self, socket1_path: str) -> None:
         self._socket1_path = socket1_path
@@ -296,6 +400,12 @@ class HyprlandWatcher:
     def _app_source(self, app: str) -> str:
         return f"{self.source}:app:{app}"
 
+    def _workspace_source(self) -> str:
+        return f"{self.source}:workspace"
+
+    def _workspace_switch_source(self) -> str:
+        return f"{self.source}:workspace_switch"
+
     async def _post_payloads(self, payloads: list[dict[str, Any]]) -> bool:
         if not payloads:
             return True
@@ -314,12 +424,16 @@ class HyprlandWatcher:
         if not self._socket1_path:
             return
         now = time.monotonic()
-        ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        now_dt = datetime.now(timezone.utc)
+        ts = now_dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        ts_end = (now_dt + timedelta(milliseconds=1)).isoformat(timespec="milliseconds").replace(
+            "+00:00", "Z"
+        )
 
         monitors: list[dict[str, Any]] | None = None
         clients: list[dict[str, Any]] | None = None
 
-        if self.track_visible_windows:
+        if self.track_visible_windows or self.track_workspaces:
             try:
                 monitors_raw = await _hypr_socket_json(self._socket1_path, "monitors")
                 if isinstance(monitors_raw, list):
@@ -358,6 +472,92 @@ class HyprlandWatcher:
                 focused_should_send = True
             if focused_should_send:
                 payloads.append({"bucket": "window", "source": self.source, "ts": ts, "data": next_focused_state})
+
+        workspace_state: dict[str, Any] | None = None
+        workspace_key: str | None = None
+        workspace_key_changed = False
+        workspace_should_send = False
+        workspace_payload: dict[str, Any] | None = None
+        if self.track_workspaces:
+            try:
+                active_ws_raw = await _hypr_socket_json(self._socket1_path, "activeworkspace")
+                if isinstance(active_ws_raw, dict):
+                    workspace_state, workspace_key = _workspace_payload(
+                        active_ws=active_ws_raw,
+                        monitors=monitors,
+                        title_max_len=self.title_max_len,
+                        focused_state=next_focused_state,
+                    )
+            except Exception as e:
+                print(f"[hyprland] activeworkspace fetch failed: {e}")
+                workspace_state = None
+
+            if workspace_key is not None:
+                workspace_key_changed = workspace_key != self._last_workspace_key
+                workspace_should_send = force or workspace_key_changed
+                if self.heartbeat_seconds > 0 and (now - self._last_workspace_sent_at) >= self.heartbeat_seconds:
+                    workspace_should_send = True
+
+            if workspace_should_send and workspace_state is not None:
+                if workspace_key_changed or self._last_workspace_state is None:
+                    workspace_payload = dict(workspace_state)
+                    if self._last_workspace_state:
+                        workspace_payload.update(
+                            {
+                                "prev_workspace": self._last_workspace_state.get("workspace"),
+                                "prev_workspace_id": self._last_workspace_state.get("workspace_id"),
+                                "prev_monitor": self._last_workspace_state.get("monitor"),
+                                "prev_monitor_id": self._last_workspace_state.get("monitor_id"),
+                            }
+                        )
+                else:
+                    workspace_payload = dict(self._last_workspace_state)
+
+                payloads.append(
+                    {
+                        "bucket": "workspace",
+                        "source": self._workspace_source(),
+                        "ts": ts,
+                        "data": workspace_payload,
+                    }
+                )
+
+                if workspace_key_changed and self._last_workspace_state:
+                    switch_payload = {
+                        "from_workspace": self._last_workspace_state.get("workspace"),
+                        "from_workspace_id": self._last_workspace_state.get("workspace_id"),
+                        "from_monitor": self._last_workspace_state.get("monitor"),
+                        "from_monitor_id": self._last_workspace_state.get("monitor_id"),
+                        "to_workspace": workspace_state.get("workspace"),
+                        "to_workspace_id": workspace_state.get("workspace_id"),
+                        "to_monitor": workspace_state.get("monitor"),
+                        "to_monitor_id": workspace_state.get("monitor_id"),
+                    }
+                    if next_focused_state:
+                        switch_payload.update(
+                            {
+                                "focused_app": next_focused_state.get("app"),
+                                "focused_title": next_focused_state.get("title"),
+                                "focused_xwayland": next_focused_state.get("xwayland"),
+                                "focused_no_focus": next_focused_state.get("no_focus"),
+                            }
+                        )
+                    payloads.append(
+                        {
+                            "bucket": "workspace_switch",
+                            "source": self._workspace_switch_source(),
+                            "ts": ts,
+                            "data": switch_payload,
+                        }
+                    )
+                    payloads.append(
+                        {
+                            "bucket": "workspace_switch",
+                            "source": self._workspace_switch_source(),
+                            "ts": ts_end,
+                            "data": {END_MARKER_KEY: True},
+                        }
+                    )
 
         visible_should_force = force
         if self.track_visible_windows and self.heartbeat_seconds > 0:
@@ -465,6 +665,7 @@ class HyprlandWatcher:
 
         sent_visible_payload = any(p.get("bucket") == "window_visible" for p in payloads)
         sent_apps_payload = any(p.get("bucket") == "app_open" for p in payloads)
+        sent_workspace_payload = any(p.get("bucket") == "workspace" for p in payloads)
 
         ok = await self._post_payloads(payloads)
         if not ok:
@@ -487,6 +688,15 @@ class HyprlandWatcher:
         if self.track_open_apps and (sent_apps_payload or open_apps_should_force):
             self._last_open_apps_sent_at = now
 
+        if self.track_workspaces and sent_workspace_payload:
+            if workspace_key is not None:
+                self._last_workspace_key = workspace_key
+            if workspace_key_changed and workspace_state is not None:
+                self._last_workspace_state = workspace_state
+            if self._last_workspace_state is None and workspace_state is not None:
+                self._last_workspace_state = workspace_state
+            self._last_workspace_sent_at = now
+
     async def send_heartbeat_if_due(self) -> None:
         if self.heartbeat_seconds <= 0:
             return
@@ -500,6 +710,9 @@ class HyprlandWatcher:
                 should = True
         if self.track_open_apps:
             if (now - self._last_open_apps_sent_at) >= self.heartbeat_seconds:
+                should = True
+        if self.track_workspaces and self._last_workspace_state is not None:
+            if (now - self._last_workspace_sent_at) >= self.heartbeat_seconds:
                 should = True
         if not should:
             return
@@ -517,6 +730,7 @@ async def run(
     track_visible_windows: bool,
     visible_all_monitors: bool,
     track_open_apps: bool,
+    track_workspaces: bool,
 ) -> None:
     watcher = HyprlandWatcher(
         server_url=server_url,
@@ -528,6 +742,7 @@ async def run(
         track_visible_windows=track_visible_windows,
         visible_all_monitors=visible_all_monitors,
         track_open_apps=track_open_apps,
+        track_workspaces=track_workspaces,
     )
 
     relevant_prefixes = (

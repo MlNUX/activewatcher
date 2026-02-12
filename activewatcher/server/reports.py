@@ -34,6 +34,46 @@ class Interval:
         }
 
 
+def _merge_ranges(ranges: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    if not ranges:
+        return []
+    items = [(s, e) for s, e in ranges if e > s]
+    if not items:
+        return []
+    items.sort(key=lambda r: r[0])
+    merged: list[tuple[datetime, datetime]] = []
+    cur_start, cur_end = items[0]
+    for start, end in items[1:]:
+        if start <= cur_end:
+            if end > cur_end:
+                cur_end = end
+            continue
+        merged.append((cur_start, cur_end))
+        cur_start, cur_end = start, end
+    merged.append((cur_start, cur_end))
+    return merged
+
+
+def _sum_ranges(ranges: list[tuple[datetime, datetime]]) -> float:
+    return sum(max(0.0, (end - start).total_seconds()) for start, end in ranges)
+
+
+def _sum_overlap(ranges: list[tuple[datetime, datetime]], start: datetime, end: datetime) -> float:
+    if end <= start:
+        return 0.0
+    total = 0.0
+    for r_start, r_end in ranges:
+        if r_end <= start:
+            continue
+        if r_start >= end:
+            break
+        a = max(r_start, start)
+        b = min(r_end, end)
+        if b > a:
+            total += (b - a).total_seconds()
+    return total
+
+
 def _parse_json(s: str) -> dict[str, Any]:
     try:
         value = json.loads(s)
@@ -497,6 +537,8 @@ def chunk_timeline(
     from_dt: datetime,
     to_dt: datetime,
     segments: list[TimelineSegment],
+    runtime_ranges: list[tuple[datetime, datetime]],
+    afk_ranges: list[tuple[datetime, datetime]],
     chunk_seconds: int,
 ) -> list[dict[str, Any]]:
     if chunk_seconds <= 0:
@@ -505,12 +547,17 @@ def chunk_timeline(
     out: list[dict[str, Any]] = []
     cursor = from_dt
     seg_idx = 0
+    runtime_ranges = sorted(runtime_ranges, key=lambda r: r[0])
+    afk_ranges = sorted(afk_ranges, key=lambda r: r[0])
 
     while cursor < to_dt:
         chunk_end = min(to_dt, cursor + timedelta(seconds=chunk_seconds))
-        active = 0.0
-        afk = 0.0
-        unknown = 0.0
+        bucket_sec = max(0.0, (chunk_end - cursor).total_seconds())
+        runtime = _sum_overlap(runtime_ranges, cursor, chunk_end)
+        afk = _sum_overlap(afk_ranges, cursor, chunk_end)
+        if afk > runtime:
+            afk = runtime
+        unknown = max(0.0, bucket_sec - runtime)
         app_totals: dict[str, float] = {}
 
         while seg_idx < len(segments) and segments[seg_idx].end <= cursor:
@@ -527,16 +574,10 @@ def chunk_timeline(
                 j += 1
                 continue
             dur = (b - a).total_seconds()
-            if seg.afk is True:
-                afk += dur
-            elif seg.afk is False:
-                active += dur
-                if seg.window:
-                    app = str(seg.window.get("app") or "")
-                    if app and not app.startswith("__"):
-                        app_totals[app] = app_totals.get(app, 0.0) + dur
-            else:
-                unknown += dur
+            if seg.afk is False and seg.window:
+                app = str(seg.window.get("app") or "")
+                if app and not app.startswith("__"):
+                    app_totals[app] = app_totals.get(app, 0.0) + dur
             j += 1
 
         top_app = None
@@ -547,7 +588,7 @@ def chunk_timeline(
             {
                 "start_ts": to_rfc3339(cursor),
                 "end_ts": to_rfc3339(chunk_end),
-                "active_seconds": round(active, 3),
+                "active_seconds": round(runtime, 3),
                 "afk_seconds": round(afk, 3),
                 "unknown_seconds": round(unknown, 3),
                 "top_app": top_app,
@@ -569,22 +610,40 @@ def summary(
         conn, bucket="window", source=None, from_ts=from_ts, to_ts=to_ts
     )
     _, _, idle = load_intervals(conn, bucket="idle", source=None, from_ts=from_dt, to_ts=to_dt)
+    _, _, all_events = load_intervals(conn, bucket=None, source=None, from_ts=from_dt, to_ts=to_dt)
     segments = build_timeline(from_dt=from_dt, to_dt=to_dt, window_intervals=window, idle_intervals=idle)
 
     apps_active = top_apps_active(segments)
     apps_total = top_apps_total(segments)
     has_idle = any(s.afk is not None for s in segments)
 
+    total_seconds = max(0.0, (to_dt - from_dt).total_seconds())
+    runtime_ranges = _merge_ranges([(it.start, it.end) for it in all_events])
+    runtime_seconds = min(total_seconds, _sum_ranges(runtime_ranges))
+    afk_ranges = _merge_ranges(
+        [(it.start, it.end) for it in idle if bool(it.data.get("afk", False))]
+    )
+    afk_seconds = min(runtime_seconds, _sum_ranges(afk_ranges))
+    unknown_seconds = max(0.0, total_seconds - runtime_seconds)
+
     return {
         "from_ts": to_rfc3339(from_dt),
         "to_ts": to_rfc3339(to_dt),
-        **activity_totals(segments),
+        "total_seconds": round(total_seconds, 3),
+        "active_seconds": round(runtime_seconds, 3),
+        "afk_seconds": round(afk_seconds, 3),
+        "unknown_seconds": round(unknown_seconds, 3),
         "top_apps_mode": "active" if has_idle else "window",
         "top_apps": apps_active if has_idle else apps_total,
         "top_apps_active": apps_active,
         "top_apps_window": apps_total,
         "timeline": [s.to_json() for s in segments],
         "timeline_chunks": chunk_timeline(
-            from_dt=from_dt, to_dt=to_dt, segments=segments, chunk_seconds=chunk_seconds
+            from_dt=from_dt,
+            to_dt=to_dt,
+            segments=segments,
+            runtime_ranges=runtime_ranges,
+            afk_ranges=afk_ranges,
+            chunk_seconds=chunk_seconds,
         ),
     }

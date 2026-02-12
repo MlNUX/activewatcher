@@ -49,6 +49,8 @@ activewatcher summary --server-url http://127.0.0.1:8712
 activewatcher events --server-url http://127.0.0.1:8712 --bucket window
 activewatcher events --server-url http://127.0.0.1:8712 --bucket window_visible
 activewatcher events --server-url http://127.0.0.1:8712 --bucket app_open
+activewatcher events --server-url http://127.0.0.1:8712 --bucket workspace
+activewatcher events --server-url http://127.0.0.1:8712 --bucket workspace_switch
 ```
 
 Web UI:
@@ -57,6 +59,20 @@ Web UI:
 - `http://127.0.0.1:8712/ui`
 - `http://127.0.0.1:8712/ui/stats` (includes detailed logs)
 - Includes a GitHub-style daily heatmap ("Calendar") with app filtering.
+
+## Browser tabs (optional)
+
+There is a small browser extension that reports open tab counts plus tab metadata
+(URL/title/flags) to the server (`bucket=browser_tabs`). It supports Brave, Chrome, and Firefox.
+
+Extension files live in `extensions/browser-tabs/`.
+
+Load it as an unpacked extension:
+
+- Chromium/Brave: `chrome://extensions` → enable "Developer mode" → "Load unpacked"
+- Firefox: `about:debugging#/runtime/this-firefox` → "Load Temporary Add-on"
+
+The charts appear on `/ui/stats` under "Browser Tabs" (count timeline, domain share, latest tabs).
 
 ## Hyprland autostart (exec-once)
 
