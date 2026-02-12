@@ -59,8 +59,6 @@ Web UI:
 - `http://127.0.0.1:8712/ui`
 - `http://127.0.0.1:8712/ui/stats` (includes detailed logs)
 - Includes a GitHub-style daily heatmap ("Calendar") with app filtering.
-- Legacy UI template file: `activewatcher/server/ui.html` (served by `activewatcher/server/ui.py`).
-- Legacy route: `http://127.0.0.1:8712/ui/legacy`
 
 ## Frontend (React + Vite)
 
@@ -90,7 +88,7 @@ npm run build
 Behavior:
 
 - If `frontend/dist/index.html` exists, FastAPI serves the built React app on `/ui` and `/ui/stats`.
-- If no frontend build exists, FastAPI falls back to the legacy UI (`activewatcher/server/ui.html`).
+- If no frontend build exists, FastAPI returns `503` on `/ui*` with a build hint.
 - You can override the dist folder via `ACTIVEWATCHER_WEB_DIST`.
 
 ## Browser tabs (optional)

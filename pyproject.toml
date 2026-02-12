@@ -21,6 +21,3 @@ activewatcher = "activewatcher.cli.main:app"
 
 [tool.setuptools.packages.find]
 include = ["activewatcher*"]
-
-[tool.setuptools.package-data]
-"activewatcher.server" = ["ui.html"]

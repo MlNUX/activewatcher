@@ -11,6 +11,13 @@ SERVER_URL="${ACTIVEWATCHER_SERVER_URL:-http://${HOST}:${PORT}}"
 
 FRONTEND_HOST="${ACTIVEWATCHER_FRONTEND_HOST:-127.0.0.1}"
 FRONTEND_PORT="${ACTIVEWATCHER_FRONTEND_PORT:-5173}"
+IDLE_THRESHOLD_SECONDS="${ACTIVEWATCHER_IDLE_THRESHOLD_SECONDS:-120}"
+
+TRACK_FOCUSED="${ACTIVEWATCHER_TRACK_FOCUSED:-1}"
+TRACK_VISIBLE_WINDOWS="${ACTIVEWATCHER_TRACK_VISIBLE_WINDOWS:-1}"
+VISIBLE_ALL_MONITORS="${ACTIVEWATCHER_VISIBLE_ALL_MONITORS:-0}"
+TRACK_OPEN_APPS="${ACTIVEWATCHER_TRACK_OPEN_APPS:-1}"
+TRACK_WORKSPACES="${ACTIVEWATCHER_TRACK_WORKSPACES:-1}"
 
 FRONTEND_DIR="${ROOT_DIR}/frontend"
 
@@ -36,6 +43,7 @@ else
 fi
 
 echo "[activewatcher] backend: ${SERVER_URL}"
+echo "[activewatcher] db: ${DB_PATH}"
 echo "[activewatcher] frontend: http://${FRONTEND_HOST}:${FRONTEND_PORT}"
 
 if [[ ! -d "${FRONTEND_DIR}/node_modules" ]]; then
@@ -78,6 +86,21 @@ if ! healthcheck; then
   echo "[activewatcher] backend healthcheck failed: ${SERVER_URL}/health" >&2
   exit 1
 fi
+
+hypr_args=()
+if [[ "${TRACK_FOCUSED}" == "1" ]]; then hypr_args+=(--track-focused); else hypr_args+=(--no-track-focused); fi
+if [[ "${TRACK_VISIBLE_WINDOWS}" == "1" ]]; then hypr_args+=(--track-visible-windows); else hypr_args+=(--no-track-visible-windows); fi
+if [[ "${VISIBLE_ALL_MONITORS}" == "1" ]]; then hypr_args+=(--visible-all-monitors); else hypr_args+=(--no-visible-all-monitors); fi
+if [[ "${TRACK_OPEN_APPS}" == "1" ]]; then hypr_args+=(--track-open-apps); else hypr_args+=(--no-track-open-apps); fi
+if [[ "${TRACK_WORKSPACES}" == "1" ]]; then hypr_args+=(--track-workspaces); else hypr_args+=(--no-track-workspaces); fi
+
+echo "[activewatcher] starting hyprland watcher (${hypr_args[*]})"
+"${AW[@]}" watch hyprland --server-url "${SERVER_URL}" "${hypr_args[@]}" &
+pids+=("$!")
+
+echo "[activewatcher] starting idle watcher (threshold=${IDLE_THRESHOLD_SECONDS}s)"
+"${AW[@]}" watch idle --server-url "${SERVER_URL}" --threshold-seconds "${IDLE_THRESHOLD_SECONDS}" &
+pids+=("$!")
 
 echo "[activewatcher] starting frontend dev server..."
 (cd "${FRONTEND_DIR}" && npm run dev -- --host "${FRONTEND_HOST}" --port "${FRONTEND_PORT}") &

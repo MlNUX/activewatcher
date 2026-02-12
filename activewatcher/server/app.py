@@ -7,14 +7,13 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from activewatcher.common.models import StateEvent
 from activewatcher.common.time import parse_rfc3339, to_utc, utcnow
 
 from . import db, ingest, reports
-from .ui import get_ui_html
 
 
 def _parse_dt_param(value: str | None, *, default: datetime) -> datetime:
@@ -81,7 +80,10 @@ def create_app(db_path: str | Path) -> FastAPI:
     def _ui_response():
         if has_frontend_build:
             return FileResponse(frontend_index, media_type="text/html")
-        return HTMLResponse(get_ui_html())
+        return PlainTextResponse(
+            "Frontend build not found. Build frontend with `cd frontend && npm run build`.",
+            status_code=503,
+        )
 
     @app.get("/ui")
     def ui():
@@ -95,9 +97,12 @@ def create_app(db_path: str | Path) -> FastAPI:
     def ui_stats():
         return _ui_response()
 
-    @app.get("/ui/legacy", response_class=HTMLResponse)
-    def ui_legacy() -> str:
-        return get_ui_html()
+    @app.get("/ui/favicon.svg")
+    def ui_favicon():
+        icon_path = frontend_dist / "favicon.svg"
+        if not icon_path.is_file():
+            raise HTTPException(status_code=404, detail="favicon not found")
+        return FileResponse(icon_path, media_type="image/svg+xml")
 
     @app.get("/ui/{path:path}")
     def ui_spa(path: str):

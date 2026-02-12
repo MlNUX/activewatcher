@@ -362,7 +362,3 @@ def category_catalog() -> CategoryCatalog:
     source, raw = _read_override(path)
     rules = _parse_rules(raw if raw is not None else _default_rule_items())
     return CategoryCatalog(rules=rules, source=source)
-
-
-def reset_category_catalog_cache() -> None:
-    category_catalog.cache_clear()

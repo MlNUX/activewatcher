@@ -156,16 +156,6 @@ type WorkspaceTransitionMatrix = {
   total: number;
 };
 
-type MonitorSetupPeriodRow = {
-  start: string;
-  end: string;
-  durationSeconds: number;
-  setup: "single" | "multi" | "unknown";
-  monitorCount: number;
-  monitors: string[];
-  signature: string;
-};
-
 type MonitorEnabledPeriodRow = {
   monitor: string;
   start: string;
@@ -642,13 +632,12 @@ function stableHash(text: string): number {
   return h >>> 0;
 }
 
-function workspaceTransitionColors(workspace: string): { bg: string; border: string; text: string; solid: string } {
+function workspaceTransitionColors(workspace: string): { bg: string; border: string; text: string } {
   const hue = stableHash(String(workspace || "?")) % 360;
   return {
     bg: `hsla(${hue}, 85%, 55%, 0.16)`,
     border: `hsla(${hue}, 90%, 72%, 0.44)`,
-    text: `hsl(${hue}, 92%, 85%)`,
-    solid: `hsl(${hue}, 84%, 60%)`
+    text: `hsl(${hue}, 92%, 85%)`
   };
 }
 
@@ -1943,7 +1932,6 @@ export default function App() {
       heatmapMaxCellSeconds: 0,
       heatmapBinSize: "",
       setupRows: [] as BarRow[],
-      periods: [] as MonitorSetupPeriodRow[],
       monitorPeriods: [] as MonitorEnabledPeriodRow[]
     };
 
@@ -2181,19 +2169,6 @@ export default function App() {
       }
     }
 
-    const periods: MonitorSetupPeriodRow[] = merged
-      .map((p) => ({
-        start: new Date(p.startMs).toISOString(),
-        end: new Date(p.endMs).toISOString(),
-        durationSeconds: Math.max(0, (p.endMs - p.startMs) / 1000),
-        setup: p.setup,
-        monitorCount: p.monitorCount,
-        monitors: p.monitors,
-        signature: p.signature
-      }))
-      .sort((a, b) => b.end.localeCompare(a.end))
-      .slice(0, 40);
-
     const monitorPeriodsRaw: Array<{
       monitor: string;
       startMs: number;
@@ -2239,15 +2214,22 @@ export default function App() {
     }
 
     const monitorPeriods: MonitorEnabledPeriodRow[] = mergedMonitorPeriods
-      .map((p) => ({
-        monitor: p.monitor,
-        start: new Date(p.startMs).toISOString(),
-        end: new Date(p.endMs).toISOString(),
-        durationSeconds: Math.max(0, (p.endMs - p.startMs) / 1000),
-        setup: p.hasMulti ? "multi" : p.hasSingle ? "single" : "unknown",
-        maxMonitorCount: p.maxMonitorCount,
-        signature: `${p.monitor}:${p.signature}:${p.startMs}`
-      }))
+      .map((p): MonitorEnabledPeriodRow => {
+        const setup: MonitorEnabledPeriodRow["setup"] = p.hasMulti
+          ? "multi"
+          : p.hasSingle
+            ? "single"
+            : "unknown";
+        return {
+          monitor: p.monitor,
+          start: new Date(p.startMs).toISOString(),
+          end: new Date(p.endMs).toISOString(),
+          durationSeconds: Math.max(0, (p.endMs - p.startMs) / 1000),
+          setup,
+          maxMonitorCount: p.maxMonitorCount,
+          signature: `${p.monitor}:${p.signature}:${p.startMs}`
+        };
+      })
       .sort(
         (a, b) =>
           b.end.localeCompare(a.end) || a.monitor.localeCompare(b.monitor, undefined, { sensitivity: "base" })
@@ -2265,7 +2247,6 @@ export default function App() {
       heatmapMaxCellSeconds,
       heatmapBinSize: workspaceBinSizeLabel(stepMs),
       setupRows,
-      periods,
       monitorPeriods
     };
   }, [workspaceEventsFiltered, windowRange, range]);
@@ -2519,7 +2500,7 @@ export default function App() {
       <header className="header">
         <div>
           <div className="brandLine">
-            <h1>activewatcher</h1>
+            <h1>Activewatcher</h1>
             <div className="navLinks">
               <a href={hrefFor("dashboard")} className={page === "dashboard" ? "pill active" : "pill"}>
                 dashboard

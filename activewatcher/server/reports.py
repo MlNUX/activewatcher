@@ -512,28 +512,6 @@ def top_apps_active(segments: list[TimelineSegment]) -> list[dict[str, Any]]:
     return out
 
 
-def activity_totals(segments: list[TimelineSegment]) -> dict[str, Any]:
-    total = 0.0
-    afk = 0.0
-    active = 0.0
-    unknown = 0.0
-    for seg in segments:
-        dur = seg.duration_seconds()
-        total += dur
-        if seg.afk is True:
-            afk += dur
-        elif seg.afk is False:
-            active += dur
-        else:
-            unknown += dur
-    return {
-        "total_seconds": round(total, 3),
-        "afk_seconds": round(afk, 3),
-        "active_seconds": round(active, 3),
-        "unknown_seconds": round(unknown, 3),
-    }
-
-
 def chunk_timeline(
     *,
     from_dt: datetime,
