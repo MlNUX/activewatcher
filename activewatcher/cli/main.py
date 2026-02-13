@@ -178,6 +178,37 @@ def watch_system(
     )
 
 
+@watch_app.command("battery")
+def watch_battery(
+    server_url: str = typer.Option(app_config.default_server_url()),
+    source: str = typer.Option(
+        app_config.config_str(("watch", "battery", "source"), env_var="ACTIVEWATCHER_BATTERY_SOURCE", default="battery")
+    ),
+    poll_seconds: float = typer.Option(
+        app_config.config_float(
+            ("watch", "battery", "poll_seconds"), env_var="ACTIVEWATCHER_BATTERY_POLL_SECONDS", default=15.0
+        )
+    ),
+    heartbeat_seconds: int = typer.Option(
+        app_config.config_int(
+            ("watch", "battery", "heartbeat_seconds"),
+            env_var="ACTIVEWATCHER_BATTERY_HEARTBEAT_SECONDS",
+            default=60,
+        )
+    ),
+) -> None:
+    from activewatcher.watchers import battery as battery_watcher
+
+    asyncio.run(
+        battery_watcher.run(
+            server_url=server_url,
+            source=source,
+            poll_seconds=poll_seconds,
+            heartbeat_seconds=heartbeat_seconds,
+        )
+    )
+
+
 @app.command()
 def events(
     server_url: str = typer.Option(app_config.default_server_url()),

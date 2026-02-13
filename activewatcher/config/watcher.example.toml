@@ -32,5 +32,11 @@ poll_seconds = 5.0
 heartbeat_seconds = 30
 include_loopback = false
 
+[watch.battery]
+enabled = true
+source = "battery"
+poll_seconds = 15.0
+heartbeat_seconds = 60
+
 [server]
 stale_after_seconds = 120

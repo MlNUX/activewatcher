@@ -16,6 +16,7 @@ load_tracking_defaults() {
   TRACK_HYPRLAND=1
   TRACK_IDLE=1
   TRACK_SYSTEM=1
+  TRACK_BATTERY=1
 
   TRACK_FOCUSED=1
   TRACK_VISIBLE_WINDOWS=1
@@ -34,6 +35,9 @@ load_tracking_defaults() {
   SYSTEM_POLL_SECONDS=5.0
   SYSTEM_HEARTBEAT_SECONDS=30
   SYSTEM_INCLUDE_LOOPBACK=0
+
+  BATTERY_POLL_SECONDS=15.0
+  BATTERY_HEARTBEAT_SECONDS=60
 
   if ! command -v python >/dev/null 2>&1; then
     return
@@ -60,6 +64,9 @@ values: dict[str, str] = {
     "TRACK_IDLE": b(cfg.config_bool(("watch", "idle", "enabled"), env_var="ACTIVEWATCHER_TRACK_IDLE", default=True)),
     "TRACK_SYSTEM": b(
         cfg.config_bool(("watch", "system", "enabled"), env_var="ACTIVEWATCHER_TRACK_SYSTEM", default=True)
+    ),
+    "TRACK_BATTERY": b(
+        cfg.config_bool(("watch", "battery", "enabled"), env_var="ACTIVEWATCHER_TRACK_BATTERY", default=True)
     ),
     "TRACK_FOCUSED": b(
         cfg.config_bool(("watch", "hyprland", "track_focused"), env_var="ACTIVEWATCHER_TRACK_FOCUSED", default=True)
@@ -129,6 +136,16 @@ values: dict[str, str] = {
     "SYSTEM_INCLUDE_LOOPBACK": b(
         cfg.config_bool(
             ("watch", "system", "include_loopback"), env_var="ACTIVEWATCHER_SYSTEM_INCLUDE_LOOPBACK", default=False
+        )
+    ),
+    "BATTERY_POLL_SECONDS": str(
+        cfg.config_float(("watch", "battery", "poll_seconds"), env_var="ACTIVEWATCHER_BATTERY_POLL_SECONDS", default=15.0)
+    ),
+    "BATTERY_HEARTBEAT_SECONDS": str(
+        cfg.config_int(
+            ("watch", "battery", "heartbeat_seconds"),
+            env_var="ACTIVEWATCHER_BATTERY_HEARTBEAT_SECONDS",
+            default=60,
         )
     ),
 }
@@ -256,6 +273,17 @@ if [[ "${TRACK_SYSTEM}" == "1" ]]; then
   echo "[activewatcher] starting system watcher (poll=${SYSTEM_POLL_SECONDS}s)"
   "${AW[@]}" watch system --server-url "${SERVER_URL}" "${system_args[@]}" &
   pids+=("$!")
+fi
+
+if [[ "${TRACK_BATTERY}" == "1" ]]; then
+  echo "[activewatcher] starting battery watcher (poll=${BATTERY_POLL_SECONDS}s)"
+  "${AW[@]}" watch battery \
+    --server-url "${SERVER_URL}" \
+    --poll-seconds "${BATTERY_POLL_SECONDS}" \
+    --heartbeat-seconds "${BATTERY_HEARTBEAT_SECONDS}" &
+  pids+=("$!")
+else
+  echo "[activewatcher] skipping battery watcher (disabled)"
 fi
 
 echo "[activewatcher] starting frontend dev server..."

@@ -7,7 +7,6 @@ type TopicId =
   | "overview"
   | "apps"
   | "categories"
-  | "mixed"
   | "websites"
   | "workspaces"
   | "monitors"
@@ -315,7 +314,6 @@ const TOPICS: Array<{ id: TopicId; label: string }> = [
   { id: "overview", label: "overview" },
   { id: "apps", label: "apps" },
   { id: "categories", label: "categories" },
-  { id: "mixed", label: "gemischt" },
   { id: "websites", label: "websites" },
   { id: "workspaces", label: "workspaces" },
   { id: "monitors", label: "monitors" },
@@ -343,7 +341,6 @@ function parseTopicId(v: string | null | undefined): TopicId {
     s === "overview" ||
     s === "apps" ||
     s === "categories" ||
-    s === "mixed" ||
     s === "websites" ||
     s === "workspaces" ||
     s === "monitors" ||
@@ -4591,110 +4588,6 @@ export default function App() {
           {showTopic("categories") ? categoriesCard : null}
         </>
       )}
-
-      {page === "stats" && showTopic("mixed") ? (
-        <section className="card">
-          <div className="cardHd">
-            <h2>Gemischt</h2>
-          </div>
-          <div className="cardBd workspaceStack">
-            <div className="split2">
-              <div>
-                <h3>Active + Visible Co-Occurrence</h3>
-                <AppCoOccurrenceMatrixView matrix={mixedInsights.coOccurrenceMatrix} />
-              </div>
-              <div>
-                <h3>Single vs Multi pro Tag</h3>
-                <DailyMonitorSplitView rows={mixedInsights.dailyMonitorSplitRows} />
-              </div>
-            </div>
-
-            <div className="split2">
-              <div>
-                <h3>App-Flows (Top 20)</h3>
-                <AppFlowTopView edges={mixedInsights.appFlowEdges} />
-              </div>
-              <div>
-                <h3>Category Transition Matrix</h3>
-                <CategoryTransitionMatrixView matrix={mixedInsights.categoryTransitionMatrix} />
-              </div>
-            </div>
-
-            <div className="split2">
-              <div>
-                <h3>Workspace Usage + Wechsel-Overlay</h3>
-                <WorkspaceUsageOverlayView rows={mixedInsights.workspaceUsageRows} />
-              </div>
-              <div>
-                <h3>Wechselkosten nach Workspace-Switch</h3>
-                <HorizontalBars rows={mixedInsights.switchingCostRows} valueFormatter={(v) => fmtSeconds(v)} />
-                <div className="sub">Stabiler Fokus = mindestens 3 Minuten in derselben App</div>
-              </div>
-            </div>
-
-            <div>
-              <h3>Produktivitaetspuls</h3>
-              <ProductivityPulseView bins={mixedInsights.productivityPulseBins} />
-            </div>
-
-            <div className="split2">
-              <div>
-                <div className="mixedControlRow">
-                  <h3>2D-Dichte: Tabs vs sichtbare Fenster</h3>
-                  <div className="mixedControlButtons">
-                    <div className="wsFilterGroup">
-                      <button
-                        type="button"
-                        className={mixedHexMetric === "cpu" ? "pill active" : "pill"}
-                        onClick={() => setMixedHexMetric("cpu")}
-                      >
-                        CPU
-                      </button>
-                      <button
-                        type="button"
-                        className={mixedHexMetric === "ram" ? "pill active" : "pill"}
-                        onClick={() => setMixedHexMetric("ram")}
-                      >
-                        RAM
-                      </button>
-                    </div>
-                    <div className="wsFilterGroup">
-                      <button
-                        type="button"
-                        className={mixedCategoryFilter === "all" ? "pill active" : "pill"}
-                        onClick={() => setMixedCategoryFilter("all")}
-                      >
-                        all categories
-                      </button>
-                      {MIXED_CATEGORY_ORDER.map((cat) => (
-                        <button
-                          key={`mixed-cat-${cat}`}
-                          type="button"
-                          className={mixedCategoryFilter === cat ? "pill active" : "pill"}
-                          onClick={() => setMixedCategoryFilter(cat)}
-                        >
-                          {mixedCategoryLabel(cat)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <HexbinDensityView matrix={mixedHexDensity} metric={mixedHexMetric} />
-              </div>
-              <div>
-                <h3>App-Domain-Workspace Tri-Graph</h3>
-                <TriGraphView graph={mixedInsights.triGraph} />
-              </div>
-            </div>
-
-            <div>
-              <h3>Workspace Entropy</h3>
-              <WorkspaceEntropyView rows={mixedInsights.workspaceEntropyRows} />
-              <div className="sub">niedrig = thematisch sauber · hoch = gemischt/chaotischer</div>
-            </div>
-          </div>
-        </section>
-      ) : null}
 
       {page === "stats" && showTopic("websites") ? (
         <section className="card">
