@@ -25,6 +25,7 @@ Start watchers:
 ```bash
 activewatcher watch hyprland --server-url http://127.0.0.1:8712
 activewatcher watch idle --server-url http://127.0.0.1:8712 --threshold-seconds 120
+activewatcher watch system --server-url http://127.0.0.1:8712 --poll-seconds 5.0
 ```
 
 Notes:
@@ -51,6 +52,7 @@ activewatcher events --server-url http://127.0.0.1:8712 --bucket window_visible
 activewatcher events --server-url http://127.0.0.1:8712 --bucket app_open
 activewatcher events --server-url http://127.0.0.1:8712 --bucket workspace
 activewatcher events --server-url http://127.0.0.1:8712 --bucket workspace_switch
+activewatcher events --server-url http://127.0.0.1:8712 --bucket system
 ```
 
 Web UI:
@@ -76,6 +78,25 @@ Start backend + frontend together:
 
 ```bash
 ./scripts/start_backend_frontend.sh
+```
+
+Always-on backend + desktop launcher:
+
+```bash
+./scripts/install_user_integration.sh
+```
+
+This installs:
+
+- `~/.config/systemd/user/activewatcher-backend.service` (enabled + started)
+- `~/.local/share/applications/activewatcher-frontend.desktop` (opens `/ui`)
+
+Useful commands:
+
+```bash
+systemctl --user status activewatcher-backend.service
+systemctl --user restart activewatcher-backend.service
+systemctl --user disable --now activewatcher-backend.service
 ```
 
 Build for FastAPI serving:
@@ -133,12 +154,50 @@ Example snippet for `hyprland.conf`:
 exec-once = activewatcher server --host 127.0.0.1 --port 8712
 exec-once = activewatcher watch hyprland --server-url http://127.0.0.1:8712
 exec-once = activewatcher watch idle --server-url http://127.0.0.1:8712 --threshold-seconds 120
+exec-once = activewatcher watch system --server-url http://127.0.0.1:8712 --poll-seconds 5.0
 ```
+
+## Tracking config (TOML)
+
+You can control what gets tracked and at which interval via a config file:
+
+- `ACTIVEWATCHER_CONFIG_PATH` (explicit file path), or
+- default path: `~/.config/activewatcher/config.toml`
+
+Example file:
+
+- `activewatcher/config/watcher.example.toml`
+
+Priority order:
+
+- CLI options
+- environment variables
+- config file
+- built-in defaults
+
+`./scripts/start_backend_frontend.sh` uses the same config keys.
 
 ## Config (env)
 
+- `ACTIVEWATCHER_CONFIG_PATH` (default `~/.config/activewatcher/config.toml`)
 - `ACTIVEWATCHER_SERVER_URL` (default `http://127.0.0.1:8712`)
 - `ACTIVEWATCHER_DB_PATH` (default `~/.local/share/activewatcher/events.sqlite3`)
 - `ACTIVEWATCHER_CATEGORIES_PATH` (default `~/.local/share/activewatcher/categories.json`)
 - `ACTIVEWATCHER_STALE_AFTER_SECONDS` (default `120`): if a source stops sending updates for longer than this,
   open intervals are treated as ended at their `last_seen_ts` in summaries.
+- Watcher enable flags:
+  - `ACTIVEWATCHER_TRACK_HYPRLAND`
+  - `ACTIVEWATCHER_TRACK_IDLE`
+  - `ACTIVEWATCHER_TRACK_SYSTEM`
+- Key interval overrides:
+  - `ACTIVEWATCHER_IDLE_POLL_SECONDS`
+  - `ACTIVEWATCHER_SYSTEM_POLL_SECONDS`
+  - `ACTIVEWATCHER_HYPRLAND_HEARTBEAT_SECONDS`
+  - `ACTIVEWATCHER_IDLE_HEARTBEAT_SECONDS`
+  - `ACTIVEWATCHER_SYSTEM_HEARTBEAT_SECONDS`
+- Key Hyprland tracking toggles:
+  - `ACTIVEWATCHER_TRACK_FOCUSED`
+  - `ACTIVEWATCHER_TRACK_VISIBLE_WINDOWS`
+  - `ACTIVEWATCHER_TRACK_OPEN_APPS`
+  - `ACTIVEWATCHER_TRACK_WORKSPACES`
+  - `ACTIVEWATCHER_VISIBLE_ALL_MONITORS`

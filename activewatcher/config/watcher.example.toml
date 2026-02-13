@@ -1,0 +1,36 @@
+# Copy this file to ~/.config/activewatcher/config.toml
+# or point ACTIVEWATCHER_CONFIG_PATH to a custom path.
+
+[watch]
+server_url = "http://127.0.0.1:8712"
+
+[watch.hyprland]
+enabled = true
+source = "hyprland"
+track_focused = true
+track_visible_windows = true
+visible_all_monitors = true
+track_open_apps = true
+track_workspaces = true
+debounce_ms = 120
+title_max_len = 200
+heartbeat_seconds = 30
+
+[watch.idle]
+enabled = true
+source = "logind"
+threshold_seconds = 120
+poll_seconds = 5.0
+heartbeat_seconds = 30
+lock_process = "hyprlock"
+# Set to "" to disable lock-process override.
+
+[watch.system]
+enabled = true
+source = "system"
+poll_seconds = 5.0
+heartbeat_seconds = 30
+include_loopback = false
+
+[server]
+stale_after_seconds = 120

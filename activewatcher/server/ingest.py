@@ -5,8 +5,9 @@ import sqlite3
 from dataclasses import asdict, dataclass
 from typing import Literal
 
+from activewatcher.common.config import default_stale_after_seconds
 from activewatcher.common.models import END_MARKER_KEY, StateEvent
-from activewatcher.common.time import to_rfc3339
+from activewatcher.common.time import parse_rfc3339, to_rfc3339
 
 
 class NonMonotonicTimestampError(ValueError):
@@ -85,8 +86,15 @@ def ingest_state(conn: sqlite3.Connection, state: StateEvent) -> IngestResult:
         event_id = int(row["id"])
         last_seen_ts = str(row["last_seen_ts"])
         start_ts = str(row["start_ts"])
+        stale_after_seconds = default_stale_after_seconds()
+        stale_gap = False
+        if stale_after_seconds > 0 and ts > last_seen_ts:
+            # If the source was silent for too long (e.g. reboot/suspend), split the interval
+            # at the last seen timestamp instead of bridging the offline gap as runtime.
+            gap_seconds = (parse_rfc3339(ts) - parse_rfc3339(last_seen_ts)).total_seconds()
+            stale_gap = gap_seconds > stale_after_seconds
 
-        if str(row["data_json"]) == data_json:
+        if str(row["data_json"]) == data_json and not stale_gap:
             if ts > last_seen_ts:
                 conn.execute("UPDATE events SET last_seen_ts = ? WHERE id = ?", (ts, event_id))
             conn.execute("COMMIT")
@@ -101,10 +109,8 @@ def ingest_state(conn: sqlite3.Connection, state: StateEvent) -> IngestResult:
                 f"non-monotonic ts for ({bucket},{source}): {ts} <= {start_ts}"
             )
 
-        conn.execute(
-            "UPDATE events SET end_ts = ?, last_seen_ts = ? WHERE id = ?",
-            (ts, ts, event_id),
-        )
+        end_ts = last_seen_ts if stale_gap else ts
+        conn.execute("UPDATE events SET end_ts = ?, last_seen_ts = ? WHERE id = ?", (end_ts, end_ts, event_id))
         cur = conn.execute(
             """
             INSERT INTO events(bucket, source, start_ts, end_ts, last_seen_ts, data_json)

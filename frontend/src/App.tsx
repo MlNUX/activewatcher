@@ -2,7 +2,18 @@ import { Fragment, type MouseEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 type RangeKey = "24h" | "1w" | "1m" | "all";
-type TopicId = "all" | "overview" | "apps" | "categories" | "websites" | "workspaces" | "monitors" | "tabs" | "logs";
+type TopicId =
+  | "all"
+  | "overview"
+  | "apps"
+  | "categories"
+  | "mixed"
+  | "websites"
+  | "workspaces"
+  | "monitors"
+  | "system"
+  | "tabs"
+  | "logs";
 type MonitorSetupFilter = "all" | "single" | "multi";
 
 type SummaryApp = {
@@ -156,6 +167,132 @@ type WorkspaceTransitionMatrix = {
   total: number;
 };
 
+type AppCoOccurrenceMatrix = {
+  activeApps: string[];
+  visibleApps: string[];
+  seconds: number[][];
+  rowTotals: number[];
+  colTotals: number[];
+  maxCellSeconds: number;
+  totalSeconds: number;
+  topPairs: Array<{ activeApp: string; visibleApp: string; seconds: number; sharePct: number }>;
+};
+
+type DailyMonitorSplitRow = {
+  id: string;
+  label: string;
+  singleSeconds: number;
+  multiSeconds: number;
+  unknownSeconds: number;
+  visibleWindowSeconds: number;
+  openAppSeconds: number;
+  totalSeconds: number;
+};
+
+type AppFlowEdge = {
+  id: string;
+  from: string;
+  to: string;
+  count: number;
+  sharePct: number;
+  topWorkspacePath: string;
+};
+
+type MixedCategory = "work" | "communication" | "research" | "entertainment" | "other";
+
+type CategoryTransitionMatrix = {
+  labels: MixedCategory[];
+  counts: number[][];
+  rowTotals: number[];
+  colTotals: number[];
+  maxCell: number;
+  total: number;
+  topTransitions: Array<{ from: MixedCategory; to: MixedCategory; count: number; rowProbPct: number; sharePct: number }>;
+};
+
+type WorkspaceUsageOverlayRow = {
+  id: string;
+  label: string;
+  seconds: number;
+  switches: number;
+  switchesPerHour: number;
+};
+
+type ProductivityPulseBin = {
+  id: string;
+  label: string;
+  startMs: number;
+  endMs: number;
+  workSeconds: number;
+  communicationSeconds: number;
+  distractionSeconds: number;
+  otherSeconds: number;
+  afkSeconds: number;
+};
+
+type HexbinDensityPoint = {
+  id: string;
+  tabsCount: number;
+  visibleWindows: number;
+  cpuPercent: number;
+  ramPercent: number;
+  category: MixedCategory;
+};
+
+type HexbinDensityCell = {
+  id: string;
+  tabsBin: number;
+  windowsBin: number;
+  samples: number;
+  medianCpu: number;
+  medianRam: number;
+};
+
+type HexbinDensityMatrix = {
+  cells: HexbinDensityCell[];
+  xBins: number[];
+  yBins: number[];
+  maxSamples: number;
+};
+
+type TriGraphNodeType = "app" | "domain" | "workspace";
+type TriGraphEdgeKind = "app-domain" | "domain-workspace" | "app-workspace";
+
+type TriGraphNode = {
+  id: string;
+  type: TriGraphNodeType;
+  raw: string;
+  label: string;
+  weight: number;
+};
+
+type TriGraphEdge = {
+  id: string;
+  kind: TriGraphEdgeKind;
+  from: string;
+  to: string;
+  weight: number;
+};
+
+type TriGraphData = {
+  appNodes: TriGraphNode[];
+  domainNodes: TriGraphNode[];
+  workspaceNodes: TriGraphNode[];
+  edges: TriGraphEdge[];
+  maxEdgeWeight: number;
+};
+
+type WorkspaceEntropyRow = {
+  id: string;
+  label: string;
+  totalSeconds: number;
+  appCount: number;
+  entropyBits: number;
+  normalizedEntropy: number;
+  switches: number;
+  switchesPerHour: number;
+};
+
 type MonitorEnabledPeriodRow = {
   monitor: string;
   start: string;
@@ -178,9 +315,11 @@ const TOPICS: Array<{ id: TopicId; label: string }> = [
   { id: "overview", label: "overview" },
   { id: "apps", label: "apps" },
   { id: "categories", label: "categories" },
+  { id: "mixed", label: "gemischt" },
   { id: "websites", label: "websites" },
   { id: "workspaces", label: "workspaces" },
   { id: "monitors", label: "monitors" },
+  { id: "system", label: "system" },
   { id: "tabs", label: "tabs" },
   { id: "logs", label: "logs" }
 ];
@@ -204,9 +343,11 @@ function parseTopicId(v: string | null | undefined): TopicId {
     s === "overview" ||
     s === "apps" ||
     s === "categories" ||
+    s === "mixed" ||
     s === "websites" ||
     s === "workspaces" ||
     s === "monitors" ||
+    s === "system" ||
     s === "tabs" ||
     s === "logs"
   ) {
@@ -293,6 +434,26 @@ function fmtPct(v: number): string {
 function fmtHours(hours: number): string {
   const v = Math.round((Number(hours) || 0) * 10) / 10;
   return `${v}h`;
+}
+
+function fmtBytes(bytes: number): string {
+  const v = Math.max(0, Number(bytes) || 0);
+  if (v >= 1024 ** 4) return `${Math.round((v / 1024 ** 4) * 100) / 100} TiB`;
+  if (v >= 1024 ** 3) return `${Math.round((v / 1024 ** 3) * 100) / 100} GiB`;
+  if (v >= 1024 ** 2) return `${Math.round((v / 1024 ** 2) * 100) / 100} MiB`;
+  if (v >= 1024) return `${Math.round((v / 1024) * 100) / 100} KiB`;
+  return `${Math.round(v)} B`;
+}
+
+function bpsToMbps(bps: number): number {
+  const v = Math.max(0, Number(bps) || 0);
+  return (v * 8) / 1_000_000;
+}
+
+function fmtMbps(mbps: number): string {
+  const v = Math.max(0, Number(mbps) || 0);
+  if (v >= 1000) return `${Math.round((v / 1000) * 100) / 100} Gbps`;
+  return `${Math.round(v * 100) / 100} Mbps`;
 }
 
 function fmtTs(ts: string): string {
@@ -685,6 +846,143 @@ function monitorSetupBarColor(setup: "single" | "multi" | "unknown"): string {
   return "linear-gradient(90deg, rgba(148,163,184,.62), rgba(100,116,139,.8))";
 }
 
+const MIXED_CATEGORY_ORDER: MixedCategory[] = ["work", "communication", "research", "entertainment", "other"];
+
+function mixedCategoryLabel(category: MixedCategory): string {
+  if (category === "work") return "Work";
+  if (category === "communication") return "Communication";
+  if (category === "research") return "Research";
+  if (category === "entertainment") return "Entertainment";
+  return "Other";
+}
+
+function mixedCategoryColor(category: MixedCategory): string {
+  if (category === "work") return "rgba(45, 212, 191, 0.9)";
+  if (category === "communication") return "rgba(96, 165, 250, 0.9)";
+  if (category === "research") return "rgba(168, 85, 247, 0.88)";
+  if (category === "entertainment") return "rgba(250, 204, 21, 0.92)";
+  return "rgba(148, 163, 184, 0.82)";
+}
+
+function pulseColor(kind: "work" | "communication" | "distraction" | "other" | "afk"): string {
+  if (kind === "work") return "rgba(45, 212, 191, 0.88)";
+  if (kind === "communication") return "rgba(96, 165, 250, 0.9)";
+  if (kind === "distraction") return "rgba(250, 204, 21, 0.9)";
+  if (kind === "afk") return "rgba(148, 163, 184, 0.78)";
+  return "rgba(167, 139, 250, 0.84)";
+}
+
+const COMM_HINTS = [
+  "slack",
+  "discord",
+  "teams",
+  "zoom",
+  "telegram",
+  "whatsapp",
+  "signal",
+  "thunderbird",
+  "outlook",
+  "mail",
+  "meet",
+  "calendar"
+];
+const WORK_HINTS = [
+  "code",
+  "codium",
+  "jetbrains",
+  "idea",
+  "pycharm",
+  "webstorm",
+  "goland",
+  "terminal",
+  "alacritty",
+  "kitty",
+  "wezterm",
+  "zsh",
+  "bash",
+  "fish",
+  "nvim",
+  "neovim",
+  "vim",
+  "emacs",
+  "notion",
+  "obsidian",
+  "overleaf",
+  "figma",
+  "jira",
+  "confluence"
+];
+const RESEARCH_HINTS = ["arxiv", "scholar", "wikipedia", "paper", "docs", "readthedocs", "stack", "pubmed", "ilias"];
+const ENTERTAINMENT_HINTS = [
+  "youtube",
+  "netflix",
+  "twitch",
+  "reddit",
+  "x.com",
+  "twitter",
+  "instagram",
+  "tiktok",
+  "spotify",
+  "steam",
+  "prime video",
+  "disney+",
+  "music"
+];
+
+function includesAny(haystack: string, needles: string[]): boolean {
+  const h = String(haystack || "").toLowerCase();
+  return needles.some((needle) => h.includes(needle));
+}
+
+function classifyDomainCategory(domain: string): MixedCategory {
+  const d = normalizeHost(domain);
+  if (!d) return "other";
+  if (includesAny(d, ["slack", "discord", "teams", "zoom", "meet.google", "mail.google", "outlook", "calendar.google", "whatsapp"])) {
+    return "communication";
+  }
+  if (includesAny(d, ["youtube", "youtu", "netflix", "twitch", "reddit", "x.com", "twitter", "instagram", "tiktok", "spotify"])) {
+    return "entertainment";
+  }
+  if (includesAny(d, ["arxiv", "wikipedia", "readthedocs", "docs", "stackoverflow", "scholar", "ilias", ".edu"])) {
+    return "research";
+  }
+  if (includesAny(d, ["github", "gitlab", "atlassian", "notion", "figma", "linear", "vercel", "npmjs"])) {
+    return "work";
+  }
+  return "other";
+}
+
+function classifyActiveCategory(
+  app: string,
+  title: string,
+  browserDomainHint?: string | null
+): MixedCategory {
+  const a = String(app || "").toLowerCase();
+  const t = String(title || "").toLowerCase();
+  const combo = `${a} ${t}`;
+
+  if (includesAny(combo, COMM_HINTS)) return "communication";
+  if (includesAny(combo, WORK_HINTS)) return "work";
+  if (includesAny(combo, RESEARCH_HINTS)) return "research";
+  if (includesAny(combo, ENTERTAINMENT_HINTS)) return "entertainment";
+
+  if (isBrowserApp(app)) {
+    const domainFromTitle = extractHostFromTitle(title);
+    const chosenDomain = browserDomainHint || domainFromTitle || "";
+    const dc = classifyDomainCategory(chosenDomain);
+    if (dc !== "other") return dc;
+  }
+
+  return "other";
+}
+
+function mixedToPulseCategory(category: MixedCategory): "work" | "communication" | "distraction" | "other" {
+  if (category === "communication") return "communication";
+  if (category === "entertainment") return "distraction";
+  if (category === "research" || category === "work") return "work";
+  return "other";
+}
+
 function tooltipPoint(e: MouseEvent<Element>): { x: number; y: number } {
   const offsetX = 14;
   const x = e.clientX + offsetX;
@@ -694,6 +992,22 @@ function tooltipPoint(e: MouseEvent<Element>): { x: number; y: number } {
     x: Math.max(10, Math.min(window.innerWidth - 10, x)),
     y: Math.max(16, Math.min(window.innerHeight - 10, y))
   };
+}
+
+function overlapSeconds(startA: number, endA: number, startB: number, endB: number): number {
+  const s = Math.max(startA, startB);
+  const e = Math.min(endA, endB);
+  return e > s ? (e - s) / 1000 : 0;
+}
+
+function median(values: number[]): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -716,7 +1030,17 @@ function TooltipPortal({ tooltip }: { tooltip: HoverTooltip | null }) {
   );
 }
 
-function DonutChart({ rows, total, title }: { rows: SliceRow[]; total: number; title: string }) {
+function DonutChart({
+  rows,
+  total,
+  title,
+  showCenterValue = true
+}: {
+  rows: SliceRow[];
+  total: number;
+  title: string;
+  showCenterValue?: boolean;
+}) {
   const [hovered, setHovered] = useState<{
     id: string;
     label: string;
@@ -825,9 +1149,11 @@ function DonutChart({ rows, total, title }: { rows: SliceRow[]; total: number; t
             />
           );
         })}
-        <text x="21" y="21" textAnchor="middle" dominantBaseline="middle" className="donutText">
-          {total > 0 ? fmtSecondsShort(total) : "-"}
-        </text>
+        {showCenterValue ? (
+          <text x="21" y="21" textAnchor="middle" dominantBaseline="middle" className="donutText">
+            {total > 0 ? fmtSecondsShort(total) : "-"}
+          </text>
+        ) : null}
       </svg>
       <div className="legend">
         {slices.slice(0, 10).map((s, idx) => (
@@ -1284,6 +1610,617 @@ function WorkspaceTransitionMatrixView({ matrix }: { matrix: WorkspaceTransition
   );
 }
 
+function AppCoOccurrenceMatrixView({ matrix }: { matrix: AppCoOccurrenceMatrix }) {
+  const [hovered, setHovered] = useState<HoverTooltip | null>(null);
+  const { activeApps, visibleApps, seconds, rowTotals, colTotals, maxCellSeconds, totalSeconds } = matrix;
+
+  const updateHover = (e: MouseEvent<HTMLDivElement>, label: string, meta?: string) => {
+    const p = tooltipPoint(e);
+    setHovered({ x: p.x, y: p.y, label, meta });
+  };
+
+  if (!activeApps.length || !visibleApps.length || totalSeconds <= 0) {
+    return <div className="empty">No co-occurrence data in this range.</div>;
+  }
+
+  const cols = `minmax(130px,auto) repeat(${visibleApps.length}, minmax(28px,1fr)) minmax(66px,auto)`;
+  return (
+    <div className="wsMatrixWrap">
+      <div className="wsMatrixNote sub">rows: active app · columns: visible app · overlap total: {fmtSeconds(totalSeconds)}</div>
+      <div className="wsMatrixScroll">
+        <div className="wsMatrixGrid" style={{ gridTemplateColumns: cols }}>
+          <div className="wsMatrixCorner">active \ visible</div>
+          {visibleApps.map((app) => (
+            <div key={`co-head-${app}`} className="wsMatrixHead">
+              {trimLabel(app, 14)}
+            </div>
+          ))}
+          <div className="wsMatrixHead wsMatrixHeadTotal">row</div>
+
+          {activeApps.map((activeApp, i) => (
+            <Fragment key={`co-row-${activeApp}`}>
+              <div
+                className="wsMatrixRowLabel"
+                onMouseEnter={(e) => updateHover(e, activeApp, `visible overlap: ${fmtSeconds(rowTotals[i] || 0)}`)}
+                onMouseMove={(e) => updateHover(e, activeApp, `visible overlap: ${fmtSeconds(rowTotals[i] || 0)}`)}
+                onMouseLeave={() => setHovered(null)}
+              >
+                <span className="wsTransitionTag">{trimLabel(activeApp, 26)}</span>
+              </div>
+              {visibleApps.map((visibleApp, j) => {
+                const v = seconds[i]?.[j] || 0;
+                const ratio = maxCellSeconds > 0 ? Math.max(0, Math.min(1, v / maxCellSeconds)) : 0;
+                return (
+                  <div
+                    key={`co-cell-${activeApp}-${visibleApp}`}
+                    className={`wsMatrixCell ${v > 0 ? "active" : ""}`}
+                    style={{ background: workspaceHeatColor(ratio) }}
+                    onMouseEnter={(e) =>
+                      updateHover(
+                        e,
+                        `${trimLabel(activeApp, 32)} + ${trimLabel(visibleApp, 32)}`,
+                        `${fmtSeconds(v)}${rowTotals[i] > 0 ? ` · ${fmtPct((v / rowTotals[i]) * 100)} of row` : ""}`
+                      )
+                    }
+                    onMouseMove={(e) =>
+                      updateHover(
+                        e,
+                        `${trimLabel(activeApp, 32)} + ${trimLabel(visibleApp, 32)}`,
+                        `${fmtSeconds(v)}${rowTotals[i] > 0 ? ` · ${fmtPct((v / rowTotals[i]) * 100)} of row` : ""}`
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
+                  >
+                    {v > 0 ? <span className="wsMatrixCellText">{fmtSecondsShort(v)}</span> : <span className="wsMatrixCellDot" />}
+                  </div>
+                );
+              })}
+              <div className="wsMatrixRowTotal">{fmtSecondsShort(rowTotals[i] || 0)}</div>
+            </Fragment>
+          ))}
+
+          <div className="wsMatrixFooterLabel">col</div>
+          {colTotals.map((v, idx) => (
+            <div key={`co-col-total-${visibleApps[idx]}`} className="wsMatrixColTotal">
+              {fmtSecondsShort(v || 0)}
+            </div>
+          ))}
+          <div className="wsMatrixFooterTotal">{fmtSecondsShort(totalSeconds)}</div>
+        </div>
+      </div>
+      <TooltipPortal tooltip={hovered} />
+    </div>
+  );
+}
+
+function DailyMonitorSplitView({ rows }: { rows: DailyMonitorSplitRow[] }) {
+  const [hovered, setHovered] = useState<HoverTooltip | null>(null);
+  if (!rows.length) return <div className="empty">No monitor split data.</div>;
+  const maxTotal = rows.reduce((m, r) => Math.max(m, r.totalSeconds), 0);
+
+  const updateHover = (e: MouseEvent<HTMLDivElement>, label: string, meta?: string) => {
+    const p = tooltipPoint(e);
+    setHovered({ x: p.x, y: p.y, label, meta });
+  };
+
+  return (
+    <div className="mixedStackWrap">
+      {rows.map((row) => {
+        const total = Math.max(1, row.totalSeconds);
+        const singlePct = (row.singleSeconds / total) * 100;
+        const multiPct = (row.multiSeconds / total) * 100;
+        const unknownPct = Math.max(0, 100 - singlePct - multiPct);
+        const scalePct = maxTotal > 0 ? (row.totalSeconds / maxTotal) * 100 : 0;
+        const avgVisible = row.totalSeconds > 0 ? row.visibleWindowSeconds / row.totalSeconds : 0;
+        const avgOpen = row.totalSeconds > 0 ? row.openAppSeconds / row.totalSeconds : 0;
+
+        return (
+          <div key={row.id} className="mixedStackRow">
+            <div className="mixedStackLabel">{row.label}</div>
+            <div className="mixedStackTrack">
+              <div className="mixedStackScale" style={{ width: `${Math.max(3, scalePct)}%` }}>
+                <div
+                  className="mixedStackSeg single"
+                  style={{ width: `${singlePct}%` }}
+                  onMouseEnter={(e) => updateHover(e, `${row.label} · single`, fmtSeconds(row.singleSeconds))}
+                  onMouseMove={(e) => updateHover(e, `${row.label} · single`, fmtSeconds(row.singleSeconds))}
+                  onMouseLeave={() => setHovered(null)}
+                />
+                <div
+                  className="mixedStackSeg multi"
+                  style={{ width: `${multiPct}%` }}
+                  onMouseEnter={(e) => updateHover(e, `${row.label} · multi`, fmtSeconds(row.multiSeconds))}
+                  onMouseMove={(e) => updateHover(e, `${row.label} · multi`, fmtSeconds(row.multiSeconds))}
+                  onMouseLeave={() => setHovered(null)}
+                />
+                <div
+                  className="mixedStackSeg unknown"
+                  style={{ width: `${unknownPct}%` }}
+                  onMouseEnter={(e) => updateHover(e, `${row.label} · unknown`, fmtSeconds(row.unknownSeconds))}
+                  onMouseMove={(e) => updateHover(e, `${row.label} · unknown`, fmtSeconds(row.unknownSeconds))}
+                  onMouseLeave={() => setHovered(null)}
+                />
+              </div>
+            </div>
+            <div className="mixedStackMeta">
+              {fmtSecondsShort(row.totalSeconds)} · vis {Math.round(avgVisible * 100) / 100} · apps {Math.round(avgOpen * 100) / 100}
+            </div>
+          </div>
+        );
+      })}
+      <div className="sub">bar width = total tracked time per day · colors = single/multi/unknown monitor share</div>
+      <TooltipPortal tooltip={hovered} />
+    </div>
+  );
+}
+
+function AppFlowTopView({ edges }: { edges: AppFlowEdge[] }) {
+  if (!edges.length) return <div className="empty">No app-to-app transitions in this range.</div>;
+  const maxCount = edges.reduce((m, e) => Math.max(m, e.count), 0);
+  return (
+    <div className="barList">
+      {edges.map((edge) => {
+        const w = maxCount > 0 ? (edge.count / maxCount) * 100 : 0;
+        return (
+          <div key={edge.id} className="barRow">
+            <div className="barLabel">
+              {trimLabel(edge.from, 16)} <span className="barSub">→ {trimLabel(edge.to, 16)}</span>
+            </div>
+            <div className="barTrack">
+              <div className="barFill" style={{ width: `${w}%`, background: "linear-gradient(90deg,#60a5fa,#22d3ee)" }} />
+            </div>
+            <div className="barValue">
+              {edge.count} · {fmtPct(edge.sharePct)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CategoryTransitionMatrixView({ matrix }: { matrix: CategoryTransitionMatrix }) {
+  const [hovered, setHovered] = useState<HoverTooltip | null>(null);
+  const { labels, counts, rowTotals, colTotals, maxCell, total } = matrix;
+  const updateHover = (e: MouseEvent<HTMLDivElement>, label: string, meta?: string) => {
+    const p = tooltipPoint(e);
+    setHovered({ x: p.x, y: p.y, label, meta });
+  };
+  if (!labels.length || total <= 0) return <div className="empty">No category transition data.</div>;
+
+  const cols = `minmax(116px,auto) repeat(${labels.length}, minmax(32px,1fr)) minmax(72px,auto)`;
+  return (
+    <div className="wsMatrixWrap">
+      <div className="wsMatrixNote sub">rows: from category · columns: to category · transitions: {total}</div>
+      <div className="wsMatrixScroll">
+        <div className="wsMatrixGrid" style={{ gridTemplateColumns: cols }}>
+          <div className="wsMatrixCorner">from \ to</div>
+          {labels.map((c) => (
+            <div key={`markov-h-${c}`} className="wsMatrixHead">
+              {mixedCategoryLabel(c)}
+            </div>
+          ))}
+          <div className="wsMatrixHead wsMatrixHeadTotal">out</div>
+
+          {labels.map((from, i) => (
+            <Fragment key={`markov-row-${from}`}>
+              <div
+                className="wsMatrixRowLabel"
+                onMouseEnter={(e) => updateHover(e, mixedCategoryLabel(from), `${rowTotals[i] || 0} outgoing transitions`)}
+                onMouseMove={(e) => updateHover(e, mixedCategoryLabel(from), `${rowTotals[i] || 0} outgoing transitions`)}
+                onMouseLeave={() => setHovered(null)}
+              >
+                <span
+                  className="wsTransitionTag"
+                  style={{
+                    background: `${mixedCategoryColor(from).replace("0.9", "0.18").replace("0.88", "0.18").replace("0.92", "0.2")}`,
+                    borderColor: mixedCategoryColor(from),
+                    color: "var(--ink)"
+                  }}
+                >
+                  {mixedCategoryLabel(from)}
+                </span>
+              </div>
+              {labels.map((to, j) => {
+                const count = counts[i]?.[j] || 0;
+                const ratio = maxCell > 0 ? Math.max(0, Math.min(1, count / maxCell)) : 0;
+                const rowProb = rowTotals[i] > 0 ? (count / rowTotals[i]) * 100 : 0;
+                return (
+                  <div
+                    key={`markov-cell-${from}-${to}`}
+                    className={`wsMatrixCell ${count > 0 ? "active" : ""}`}
+                    style={{ background: workspaceHeatColor(ratio) }}
+                    onMouseEnter={(e) =>
+                      updateHover(
+                        e,
+                        `${mixedCategoryLabel(from)} → ${mixedCategoryLabel(to)}`,
+                        `${count} transitions · ${fmtPct(rowProb)} row-prob`
+                      )
+                    }
+                    onMouseMove={(e) =>
+                      updateHover(
+                        e,
+                        `${mixedCategoryLabel(from)} → ${mixedCategoryLabel(to)}`,
+                        `${count} transitions · ${fmtPct(rowProb)} row-prob`
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
+                  >
+                    {count > 0 ? <span className="wsMatrixCellText">{count}</span> : <span className="wsMatrixCellDot" />}
+                  </div>
+                );
+              })}
+              <div className="wsMatrixRowTotal">{rowTotals[i] || 0}</div>
+            </Fragment>
+          ))}
+
+          <div className="wsMatrixFooterLabel">in</div>
+          {colTotals.map((v, idx) => (
+            <div key={`markov-col-total-${labels[idx]}`} className="wsMatrixColTotal">
+              {v}
+            </div>
+          ))}
+          <div className="wsMatrixFooterTotal">{total}</div>
+        </div>
+      </div>
+      <TooltipPortal tooltip={hovered} />
+    </div>
+  );
+}
+
+function WorkspaceUsageOverlayView({ rows }: { rows: WorkspaceUsageOverlayRow[] }) {
+  if (!rows.length) return <div className="empty">No workspace usage rows.</div>;
+  const maxTime = rows.reduce((m, r) => Math.max(m, r.seconds), 0);
+  const maxSwitches = rows.reduce((m, r) => Math.max(m, r.switches), 0);
+  return (
+    <div className="barList">
+      {rows.map((row) => {
+        const timeW = maxTime > 0 ? (row.seconds / maxTime) * 100 : 0;
+        const switchW = maxSwitches > 0 ? (row.switches / maxSwitches) * 100 : 0;
+        return (
+          <div key={row.id} className="barRow">
+            <div className="barLabel">
+              {row.label}
+              <span className="barSub">{row.switches} switches · {Math.round(row.switchesPerHour * 100) / 100}/h</span>
+            </div>
+            <div className="mixedUsageTrack">
+              <div className="mixedUsageTime" style={{ width: `${timeW}%` }} />
+              <div className="mixedUsageSwitch" style={{ width: `${switchW}%` }} />
+            </div>
+            <div className="barValue">{fmtSeconds(row.seconds)}</div>
+          </div>
+        );
+      })}
+      <div className="sub">cyan = time share · yellow overlay = switch intensity</div>
+    </div>
+  );
+}
+
+function ProductivityPulseView({ bins }: { bins: ProductivityPulseBin[] }) {
+  const [hovered, setHovered] = useState<HoverTooltip | null>(null);
+  if (!bins.length) return <div className="empty">No productivity pulse data.</div>;
+  const showEvery = Math.max(1, Math.floor(bins.length / 12));
+
+  const updateHover = (e: MouseEvent<HTMLDivElement>, bin: ProductivityPulseBin) => {
+    const p = tooltipPoint(e);
+    const duration = Math.max(1, (bin.endMs - bin.startMs) / 1000);
+    setHovered({
+      x: p.x,
+      y: p.y,
+      label: `${fmtTs(new Date(bin.startMs).toISOString())} → ${fmtTs(new Date(bin.endMs).toISOString())}`,
+      meta: `work ${fmtPct((bin.workSeconds / duration) * 100)} · comm ${fmtPct((bin.communicationSeconds / duration) * 100)} · distract ${fmtPct((bin.distractionSeconds / duration) * 100)} · afk ${fmtPct((bin.afkSeconds / duration) * 100)}`
+    });
+  };
+
+  return (
+    <div className="pulseWrap">
+      <div className="pulseLegend">
+        <span><span className="legendDotLegacy" style={{ background: pulseColor("work") }} />Work</span>
+        <span><span className="legendDotLegacy" style={{ background: pulseColor("communication") }} />Communication</span>
+        <span><span className="legendDotLegacy" style={{ background: pulseColor("distraction") }} />Distraction</span>
+        <span><span className="legendDotLegacy" style={{ background: pulseColor("other") }} />Other</span>
+        <span><span className="legendDotLegacy" style={{ background: pulseColor("afk") }} />AFK</span>
+      </div>
+      <div className="pulseBars">
+        {bins.map((bin) => {
+          const duration = Math.max(1, (bin.endMs - bin.startMs) / 1000);
+          const workPct = Math.max(0, Math.min(100, (bin.workSeconds / duration) * 100));
+          const commPct = Math.max(0, Math.min(100, (bin.communicationSeconds / duration) * 100));
+          const distractPct = Math.max(0, Math.min(100, (bin.distractionSeconds / duration) * 100));
+          const otherPct = Math.max(0, Math.min(100, (bin.otherSeconds / duration) * 100));
+          const afkPct = Math.max(0, Math.min(100, (bin.afkSeconds / duration) * 100));
+          return (
+            <div
+              key={bin.id}
+              className="pulseBarCol"
+              onMouseEnter={(e) => updateHover(e, bin)}
+              onMouseMove={(e) => updateHover(e, bin)}
+              onMouseLeave={() => setHovered(null)}
+            >
+              <div className="pulseSeg work" style={{ height: `${workPct}%` }} />
+              <div className="pulseSeg communication" style={{ height: `${commPct}%` }} />
+              <div className="pulseSeg distraction" style={{ height: `${distractPct}%` }} />
+              <div className="pulseSeg other" style={{ height: `${otherPct}%` }} />
+              <div className="pulseSeg afk" style={{ height: `${afkPct}%` }} />
+            </div>
+          );
+        })}
+      </div>
+      <div className="pulseLabels">
+        {bins.map((bin, idx) => (
+          <span key={`pulse-l-${bin.id}`}>{idx % showEvery === 0 || idx === bins.length - 1 ? bin.label : ""}</span>
+        ))}
+      </div>
+      <TooltipPortal tooltip={hovered} />
+    </div>
+  );
+}
+
+function HexbinDensityView({
+  matrix,
+  metric
+}: {
+  matrix: HexbinDensityMatrix;
+  metric: "cpu" | "ram";
+}) {
+  const [hovered, setHovered] = useState<HoverTooltip | null>(null);
+  const { cells, xBins, yBins, maxSamples } = matrix;
+  if (!cells.length || !xBins.length || !yBins.length) {
+    return <div className="empty">No 2D density samples for the current filter.</div>;
+  }
+
+  const rows = [...yBins].sort((a, b) => b - a);
+  const cellMap = new Map(cells.map((c) => [`${c.tabsBin}|${c.windowsBin}`, c]));
+  const maxMetric = cells.reduce((m, c) => Math.max(m, metric === "cpu" ? c.medianCpu : c.medianRam), 0);
+  const cols = `minmax(98px,auto) repeat(${xBins.length}, minmax(30px,1fr))`;
+
+  const updateHover = (e: MouseEvent<HTMLDivElement>, cell: HexbinDensityCell) => {
+    const p = tooltipPoint(e);
+    const tabsLabel = `${cell.tabsBin}-${cell.tabsBin + 4}`;
+    setHovered({
+      x: p.x,
+      y: p.y,
+      label: `${tabsLabel} tabs · ${cell.windowsBin} visible windows`,
+      meta: `${cell.samples} samples · CPU ${fmtPct(cell.medianCpu)} · RAM ${fmtPct(cell.medianRam)}`
+    });
+  };
+
+  return (
+    <div className="wsMatrixWrap">
+      <div className="wsMatrixNote sub">x = tab count (5-tab bins) · y = visible window count · color = median {metric.toUpperCase()}</div>
+      <div className="wsMatrixScroll">
+        <div className="wsMatrixGrid hexbinGrid" style={{ gridTemplateColumns: cols }}>
+          <div className="wsMatrixCorner">visible \ tabs</div>
+          {xBins.map((x) => (
+            <div key={`hex-x-${x}`} className="wsMatrixHead">
+              {x}-{x + 4}
+            </div>
+          ))}
+          {rows.map((y) => (
+            <Fragment key={`hex-row-${y}`}>
+              <div className="wsMatrixRowLabel">
+                <span className="wsTransitionTag hexbinAxisTag">{y}</span>
+              </div>
+              {xBins.map((x) => {
+                const cell = cellMap.get(`${x}|${y}`);
+                if (!cell) return <div key={`hex-cell-empty-${x}-${y}`} className="wsMatrixCell hexbinCell empty" />;
+
+                const metricValue = metric === "cpu" ? cell.medianCpu : cell.medianRam;
+                const metricRatio = maxMetric > 0 ? Math.max(0, Math.min(1, metricValue / maxMetric)) : 0;
+                const sampleRatio = maxSamples > 0 ? Math.max(0, Math.min(1, cell.samples / maxSamples)) : 0;
+                return (
+                  <div
+                    key={`hex-cell-${x}-${y}`}
+                    className="wsMatrixCell hexbinCell active"
+                    style={{
+                      background: workspaceHeatColor(metricRatio),
+                      boxShadow: `inset 0 0 0 1px rgba(255,255,255,${0.08 + sampleRatio * 0.36})`,
+                      opacity: 0.42 + sampleRatio * 0.58
+                    }}
+                    onMouseEnter={(e) => updateHover(e, cell)}
+                    onMouseMove={(e) => updateHover(e, cell)}
+                    onMouseLeave={() => setHovered(null)}
+                  >
+                    <span className="wsMatrixCellText">{cell.samples}</span>
+                  </div>
+                );
+              })}
+            </Fragment>
+          ))}
+        </div>
+      </div>
+      <TooltipPortal tooltip={hovered} />
+    </div>
+  );
+}
+
+function TriGraphView({ graph }: { graph: TriGraphData }) {
+  const [hovered, setHovered] = useState<HoverTooltip | null>(null);
+  const { appNodes, domainNodes, workspaceNodes, edges, maxEdgeWeight } = graph;
+  if (!edges.length || (!appNodes.length && !domainNodes.length && !workspaceNodes.length)) {
+    return <div className="empty">No tri-graph edges in this range.</div>;
+  }
+
+  const width = 920;
+  const laneMax = Math.max(appNodes.length, domainNodes.length, workspaceNodes.length, 1);
+  const height = Math.max(300, 96 + laneMax * 34);
+  const laneX: Record<TriGraphNodeType, number> = {
+    app: 110,
+    domain: 460,
+    workspace: 810
+  };
+
+  const yFor = (idx: number, total: number): number => {
+    const inner = height - 94;
+    if (total <= 1) return 48 + inner / 2;
+    return 48 + ((idx + 1) * inner) / (total + 1);
+  };
+
+  const pos = new Map<string, { x: number; y: number; node: TriGraphNode }>();
+  appNodes.forEach((node, idx) => pos.set(node.id, { x: laneX.app, y: yFor(idx, appNodes.length), node }));
+  domainNodes.forEach((node, idx) => pos.set(node.id, { x: laneX.domain, y: yFor(idx, domainNodes.length), node }));
+  workspaceNodes.forEach((node, idx) => pos.set(node.id, { x: laneX.workspace, y: yFor(idx, workspaceNodes.length), node }));
+
+  const edgeColor = (kind: TriGraphEdgeKind): string => {
+    if (kind === "app-domain") return "rgba(96,165,250,0.82)";
+    if (kind === "domain-workspace") return "rgba(167,139,250,0.82)";
+    return "rgba(250,204,21,0.78)";
+  };
+
+  const updateEdgeHover = (e: MouseEvent<SVGPathElement>, edge: TriGraphEdge) => {
+    const p = tooltipPoint(e as unknown as MouseEvent<Element>);
+    const fromNode = pos.get(edge.from)?.node;
+    const toNode = pos.get(edge.to)?.node;
+    setHovered({
+      x: p.x,
+      y: p.y,
+      label: `${fromNode?.label || edge.from} -> ${toNode?.label || edge.to}`,
+      meta: `${edge.kind} · ${fmtSeconds(edge.weight)}`
+    });
+  };
+
+  const updateNodeHover = (e: MouseEvent<SVGGElement>, node: TriGraphNode) => {
+    const p = tooltipPoint(e as unknown as MouseEvent<Element>);
+    setHovered({
+      x: p.x,
+      y: p.y,
+      label: node.label,
+      meta: `${node.type} · ${fmtSeconds(node.weight)}`
+    });
+  };
+
+  const laneLabel = (type: TriGraphNodeType): string => {
+    if (type === "app") return "Apps";
+    if (type === "domain") return "Domains";
+    return "Workspaces";
+  };
+
+  return (
+    <div className="triGraphWrap">
+      <svg className="triGraphSvg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMinYMin meet">
+        {(["app", "domain", "workspace"] as TriGraphNodeType[]).map((type) => (
+          <g key={`lane-${type}`}>
+            <line
+              x1={laneX[type]}
+              y1={38}
+              x2={laneX[type]}
+              y2={height - 20}
+              stroke="rgba(166,213,255,.2)"
+              strokeDasharray="4 6"
+              strokeWidth="1"
+            />
+            <text x={laneX[type]} y={20} textAnchor="middle" className="triLaneLabel">
+              {laneLabel(type)}
+            </text>
+          </g>
+        ))}
+
+        {[...edges]
+          .sort((a, b) => a.weight - b.weight)
+          .map((edge) => {
+            const from = pos.get(edge.from);
+            const to = pos.get(edge.to);
+            if (!from || !to) return null;
+            const dx = to.x - from.x;
+            const c1x = from.x + dx * 0.34;
+            const c2x = from.x + dx * 0.66;
+            const d = `M ${from.x} ${from.y} C ${c1x} ${from.y}, ${c2x} ${to.y}, ${to.x} ${to.y}`;
+            const w = maxEdgeWeight > 0 ? 1 + (edge.weight / maxEdgeWeight) * 5 : 1;
+            return (
+              <path
+                key={edge.id}
+                d={d}
+                fill="none"
+                stroke={edgeColor(edge.kind)}
+                strokeWidth={w}
+                strokeLinecap="round"
+                className="triEdge"
+                onMouseEnter={(e) => updateEdgeHover(e, edge)}
+                onMouseMove={(e) => updateEdgeHover(e, edge)}
+                onMouseLeave={() => setHovered(null)}
+              />
+            );
+          })}
+
+        {[...appNodes, ...domainNodes, ...workspaceNodes].map((node) => {
+          const p = pos.get(node.id);
+          if (!p) return null;
+          const fill =
+            node.type === "app"
+              ? "rgba(45,212,191,.95)"
+              : node.type === "domain"
+                ? "rgba(96,165,250,.95)"
+                : "rgba(250,204,21,.92)";
+          const anchor = node.type === "app" ? "start" : node.type === "workspace" ? "end" : "middle";
+          const textX = node.type === "app" ? p.x + 10 : node.type === "workspace" ? p.x - 10 : p.x;
+          return (
+            <g
+              key={`tri-node-${node.id}`}
+              className="triNode"
+              onMouseEnter={(e) => updateNodeHover(e, node)}
+              onMouseMove={(e) => updateNodeHover(e, node)}
+              onMouseLeave={() => setHovered(null)}
+            >
+              <circle cx={p.x} cy={p.y} r={5.8} fill={fill} stroke="rgba(5,10,18,.9)" strokeWidth="1.1" />
+              <text x={textX} y={p.y + 3.5} textAnchor={anchor} className="triNodeLabel">
+                {trimLabel(node.label, 18)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <TooltipPortal tooltip={hovered} />
+    </div>
+  );
+}
+
+function WorkspaceEntropyView({ rows }: { rows: WorkspaceEntropyRow[] }) {
+  const [hovered, setHovered] = useState<HoverTooltip | null>(null);
+  if (!rows.length) return <div className="empty">No workspace entropy rows.</div>;
+  const maxSwitches = rows.reduce((m, r) => Math.max(m, r.switches), 0);
+
+  const updateHover = (e: MouseEvent<HTMLDivElement>, row: WorkspaceEntropyRow) => {
+    const p = tooltipPoint(e);
+    setHovered({
+      x: p.x,
+      y: p.y,
+      label: row.label,
+      meta: `${Math.round(row.entropyBits * 100) / 100} bits · ${fmtPct(row.normalizedEntropy * 100)} normalized · ${row.switches} switches (${Math.round(row.switchesPerHour * 100) / 100}/h) · ${row.appCount} apps`
+    });
+  };
+
+  return (
+    <div className="barList">
+      {rows.map((row) => {
+        const entropyW = Math.max(0, Math.min(100, row.normalizedEntropy * 100));
+        const switchW = maxSwitches > 0 ? (row.switches / maxSwitches) * 100 : 0;
+        return (
+          <div key={row.id} className="barRow">
+            <div className="barLabel">
+              {row.label}
+              <span className="barSub">
+                {row.appCount} apps · {row.switches} switches
+              </span>
+            </div>
+            <div
+              className="entropyTrack"
+              onMouseEnter={(e) => updateHover(e, row)}
+              onMouseMove={(e) => updateHover(e, row)}
+              onMouseLeave={() => setHovered(null)}
+            >
+              <div className="entropyFill" style={{ width: `${entropyW}%` }} />
+              <div className="entropySwitch" style={{ width: `${switchW}%` }} />
+            </div>
+            <div className="barValue">{Math.round(row.entropyBits * 100) / 100} bits</div>
+          </div>
+        );
+      })}
+      <div className="sub">cyan = normalized entropy (topic spread) · yellow overlay = switch frequency</div>
+      <TooltipPortal tooltip={hovered} />
+    </div>
+  );
+}
+
 function LegacyTimeline({
   chunks,
   range,
@@ -1344,7 +2281,7 @@ function LegacyTimeline({
     const aPct = bucketSec > 0 ? (active / bucketSec) * 100 : 0;
     const fPct = bucketSec > 0 ? (afk / bucketSec) * 100 : 0;
     const aPctC = Math.max(0, Math.min(100, aPct));
-    const fPctC = Math.max(0, Math.min(aPctC, fPct));
+    const fPctC = Math.max(0, Math.min(100, fPct));
     return {
       idx: i,
       ...c,
@@ -1442,7 +2379,7 @@ function LegacyTimeline({
                 onMouseLeave={() => setHovered(null)}
               >
                 <div className="barSegLegacy active" style={{ height: `${e.activePct}%` }} />
-                <div className="barSegLegacy afkOverlay" style={{ height: `${e.afkPct}%` }} />
+                <div className="barSegLegacy afk" style={{ height: `${e.afkPct}%` }} />
               </div>
             ))}
           </div>
@@ -1474,6 +2411,8 @@ export default function App() {
   const [range, setRange] = useState<RangeKey>(initialRange);
   const [topic, setTopic] = useState<TopicId>(initialTopic);
   const [monitorSetupFilter, setMonitorSetupFilter] = useState<MonitorSetupFilter>("all");
+  const [mixedCategoryFilter, setMixedCategoryFilter] = useState<"all" | MixedCategory>("all");
+  const [mixedHexMetric, setMixedHexMetric] = useState<"cpu" | "ram">("cpu");
   const [reloadKey, setReloadKey] = useState(0);
 
   function replaceQuery(nextRange: RangeKey, nextTopic: TopicId): void {
@@ -1512,7 +2451,10 @@ export default function App() {
   const [windowEvents, setWindowEvents] = useState<ApiEvent[]>([]);
   const [workspaceEvents, setWorkspaceEvents] = useState<ApiEvent[]>([]);
   const [workspaceSwitchEvents, setWorkspaceSwitchEvents] = useState<ApiEvent[]>([]);
+  const [systemEvents, setSystemEvents] = useState<ApiEvent[]>([]);
   const [tabsEvents, setTabsEvents] = useState<ApiEvent[]>([]);
+  const [appOpenEvents, setAppOpenEvents] = useState<ApiEvent[]>([]);
+  const [idleEvents, setIdleEvents] = useState<ApiEvent[]>([]);
   const [visibleEvents, setVisibleEvents] = useState<ApiEvent[]>([]);
 
   const [loading, setLoading] = useState(false);
@@ -1563,7 +2505,10 @@ export default function App() {
         windowData,
         workspaceData,
         workspaceSwitchData,
+        systemData,
         tabsData,
+        appOpenData,
+        idleData,
         visibleData
       ] = await Promise.all([
         safe(
@@ -1583,7 +2528,10 @@ export default function App() {
           () => fetchJson<EventsResponse>(`/v1/events?bucket=workspace_switch&${query}`),
           { events: [] }
         ),
+        safe("system", () => fetchJson<EventsResponse>(`/v1/events?bucket=system&${query}`), { events: [] }),
         safe("browser_tabs", () => fetchJson<EventsResponse>(`/v1/events?bucket=browser_tabs&${query}`), { events: [] }),
+        safe("app_open", () => fetchJson<EventsResponse>(`/v1/events?bucket=app_open&${query}`), { events: [] }),
+        safe("idle", () => fetchJson<EventsResponse>(`/v1/events?bucket=idle&${query}`), { events: [] }),
         safe("window_visible", () => fetchJson<EventsResponse>(`/v1/events?bucket=window_visible&${query}`), {
           events: []
         })
@@ -1596,7 +2544,10 @@ export default function App() {
       setWindowEvents(Array.isArray(windowData.events) ? windowData.events : []);
       setWorkspaceEvents(Array.isArray(workspaceData.events) ? workspaceData.events : []);
       setWorkspaceSwitchEvents(Array.isArray(workspaceSwitchData.events) ? workspaceSwitchData.events : []);
+      setSystemEvents(Array.isArray(systemData.events) ? systemData.events : []);
       setTabsEvents(Array.isArray(tabsData.events) ? tabsData.events : []);
+      setAppOpenEvents(Array.isArray(appOpenData.events) ? appOpenData.events : []);
+      setIdleEvents(Array.isArray(idleData.events) ? idleData.events : []);
       setVisibleEvents(Array.isArray(visibleData.events) ? visibleData.events : []);
 
       setError(errors.join(" | "));
@@ -2251,6 +3202,172 @@ export default function App() {
     };
   }, [workspaceEventsFiltered, windowRange, range]);
 
+  const systemInsights = useMemo(() => {
+    const empty = {
+      cpuSeries: [] as LinePoint[],
+      memSeries: [] as LinePoint[],
+      netRxSeries: [] as LinePoint[],
+      netTxSeries: [] as LinePoint[],
+      netTotalSeries: [] as LinePoint[],
+      avgCpu: 0,
+      peakCpu: 0,
+      avgMem: 0,
+      peakMem: 0,
+      avgNetTotalMbps: 0,
+      peakNetTotalMbps: 0,
+      ifaceRows: [] as BarRow[],
+      latest:
+        null as
+          | {
+              ts: string;
+              cpuPercent: number;
+              memPercent: number;
+              memUsedBytes: number;
+              memTotalBytes: number;
+              netRxMbps: number;
+              netTxMbps: number;
+              netTotalMbps: number;
+              interfaces: string[];
+            }
+          | null
+    };
+
+    if (!windowRange) return empty;
+    const fromMs = Date.parse(windowRange.from);
+    const toMs = Date.parse(windowRange.to);
+    if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs <= fromMs) return empty;
+
+    const cpuSeries: LinePoint[] = [];
+    const memSeries: LinePoint[] = [];
+    const netRxSeries: LinePoint[] = [];
+    const netTxSeries: LinePoint[] = [];
+    const netTotalSeries: LinePoint[] = [];
+    const ifaceSeconds = new Map<string, number>();
+
+    let latestMs = -1;
+    let latest: (typeof empty)["latest"] = null;
+
+    const addIfaceSeconds = (iface: string, sec: number): void => {
+      const key = String(iface || "").trim();
+      if (!key) return;
+      ifaceSeconds.set(key, (ifaceSeconds.get(key) || 0) + Math.max(0, sec));
+    };
+
+    for (const e of systemEvents) {
+      const data = (e?.data && typeof e.data === "object" ? e.data : undefined) as Record<string, unknown> | undefined;
+      if (!data) continue;
+
+      const startMs = Date.parse(e.start_ts);
+      const endMs = Date.parse(e.end_ts);
+      const tsMs = !Number.isNaN(endMs) ? endMs : startMs;
+      if (Number.isNaN(tsMs) || tsMs < fromMs || tsMs > toMs) continue;
+
+      const cpuPercent = Math.max(0, Math.min(100, asNumber(data.cpu_percent)));
+      const memTotalBytes = Math.max(0, asNumber(data.mem_total_bytes));
+      const memUsedBytes = Math.max(0, asNumber(data.mem_used_bytes));
+      let memPercent = asNumber(data.mem_percent);
+      if ((!Number.isFinite(memPercent) || memPercent <= 0) && memTotalBytes > 0) {
+        memPercent = (memUsedBytes / memTotalBytes) * 100;
+      }
+      memPercent = Math.max(0, Math.min(100, Number.isFinite(memPercent) ? memPercent : 0));
+
+      const netRxBps = Math.max(0, asNumber(data.net_rx_bps));
+      const netTxBps = Math.max(0, asNumber(data.net_tx_bps));
+      const netTotalBps = Math.max(netRxBps + netTxBps, Math.max(0, asNumber(data.net_total_bps)));
+      const netRxMbps = bpsToMbps(netRxBps);
+      const netTxMbps = bpsToMbps(netTxBps);
+      const netTotalMbps = bpsToMbps(netTotalBps);
+
+      cpuSeries.push({ t: tsMs, value: cpuPercent });
+      memSeries.push({ t: tsMs, value: memPercent });
+      netRxSeries.push({ t: tsMs, value: netRxMbps });
+      netTxSeries.push({ t: tsMs, value: netTxMbps });
+      netTotalSeries.push({ t: tsMs, value: netTotalMbps });
+
+      if (!Number.isNaN(startMs) && !Number.isNaN(endMs)) {
+        const clipStart = Math.max(fromMs, startMs);
+        const clipEnd = Math.min(toMs, endMs);
+        const durationSeconds = clipEnd > clipStart ? (clipEnd - clipStart) / 1000 : 0;
+        if (durationSeconds > 0 && Array.isArray(data.net_interfaces)) {
+          for (const raw of data.net_interfaces) {
+            addIfaceSeconds(String(raw || ""), durationSeconds);
+          }
+        }
+      }
+
+      if (tsMs >= latestMs) {
+        latestMs = tsMs;
+        const interfaces = Array.isArray(data.net_interfaces)
+          ? Array.from(
+              new Set(
+                data.net_interfaces
+                  .map((v) => String(v || "").trim())
+                  .filter((v) => v && v !== "null" && v !== "undefined")
+              )
+            )
+          : [];
+        latest = {
+          ts: new Date(tsMs).toISOString(),
+          cpuPercent,
+          memPercent,
+          memUsedBytes,
+          memTotalBytes,
+          netRxMbps,
+          netTxMbps,
+          netTotalMbps,
+          interfaces
+        };
+      }
+    }
+
+    const dedupPoints = (points: LinePoint[]): LinePoint[] => {
+      const sorted = [...points].sort((a, b) => a.t - b.t);
+      const out: LinePoint[] = [];
+      for (const p of sorted) {
+        const prev = out[out.length - 1];
+        if (prev && prev.t === p.t) prev.value = p.value;
+        else out.push({ ...p });
+      }
+      return out;
+    };
+
+    const cpuSeriesD = dedupPoints(cpuSeries);
+    const memSeriesD = dedupPoints(memSeries);
+    const netRxSeriesD = dedupPoints(netRxSeries);
+    const netTxSeriesD = dedupPoints(netTxSeries);
+    const netTotalSeriesD = dedupPoints(netTotalSeries);
+
+    const avg = (points: LinePoint[]): number =>
+      points.length > 0 ? points.reduce((sum, p) => sum + p.value, 0) / points.length : 0;
+    const peak = (points: LinePoint[]): number => points.reduce((m, p) => Math.max(m, p.value), 0);
+
+    const ifaceRows: BarRow[] = Array.from(ifaceSeconds.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([iface, seconds]) => ({
+        id: iface,
+        label: iface,
+        value: seconds,
+        sub: "interface active"
+      }));
+
+    return {
+      cpuSeries: cpuSeriesD,
+      memSeries: memSeriesD,
+      netRxSeries: netRxSeriesD,
+      netTxSeries: netTxSeriesD,
+      netTotalSeries: netTotalSeriesD,
+      avgCpu: avg(cpuSeriesD),
+      peakCpu: peak(cpuSeriesD),
+      avgMem: avg(memSeriesD),
+      peakMem: peak(memSeriesD),
+      avgNetTotalMbps: avg(netTotalSeriesD),
+      peakNetTotalMbps: peak(netTotalSeriesD),
+      ifaceRows,
+      latest
+    };
+  }, [systemEvents, windowRange]);
+
   const tabsCountSeries = useMemo<LinePoint[]>(() => {
     if (!windowRange) return [];
     const fromMs = Date.parse(windowRange.from);
@@ -2362,6 +3479,869 @@ export default function App() {
         ]
       }));
   }, [tabsEvents, windowRange]);
+
+  const mixedInsights = useMemo(() => {
+    const empty = {
+      coOccurrenceMatrix: {
+        activeApps: [],
+        visibleApps: [],
+        seconds: [],
+        rowTotals: [],
+        colTotals: [],
+        maxCellSeconds: 0,
+        totalSeconds: 0,
+        topPairs: []
+      } as AppCoOccurrenceMatrix,
+      dailyMonitorSplitRows: [] as DailyMonitorSplitRow[],
+      appFlowEdges: [] as AppFlowEdge[],
+      categoryTransitionMatrix: {
+        labels: [],
+        counts: [],
+        rowTotals: [],
+        colTotals: [],
+        maxCell: 0,
+        total: 0,
+        topTransitions: []
+      } as CategoryTransitionMatrix,
+      workspaceUsageRows: [] as WorkspaceUsageOverlayRow[],
+      productivityPulseBins: [] as ProductivityPulseBin[],
+      switchingCostRows: [] as BarRow[],
+      hexbinPoints: [] as HexbinDensityPoint[],
+      triGraph: {
+        appNodes: [],
+        domainNodes: [],
+        workspaceNodes: [],
+        edges: [],
+        maxEdgeWeight: 0
+      } as TriGraphData,
+      workspaceEntropyRows: [] as WorkspaceEntropyRow[]
+    };
+
+    if (!windowRange) return empty;
+    const fromMs = Date.parse(windowRange.from);
+    const toMs = Date.parse(windowRange.to);
+    if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs <= fromMs) return empty;
+
+    type ActiveInterval = {
+      start: number;
+      end: number;
+      app: string;
+      title: string;
+      workspace: string;
+      category: MixedCategory;
+    };
+    type VisibleInterval = {
+      start: number;
+      end: number;
+      app: string;
+      title: string;
+      workspace: string;
+    };
+    type WorkspaceInterval = {
+      start: number;
+      end: number;
+      workspace: string;
+      setup: "single" | "multi" | "unknown";
+    };
+    type AfkInterval = { start: number; end: number };
+
+    const parseSpan = (startTs: string, endTs: string): { start: number; end: number } | null => {
+      const start = Date.parse(startTs);
+      const end = Date.parse(endTs);
+      if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return null;
+      if (end <= fromMs || start >= toMs) return null;
+      const clippedStart = Math.max(fromMs, start);
+      const clippedEnd = Math.min(toMs, end);
+      if (clippedEnd <= clippedStart) return null;
+      return { start: clippedStart, end: clippedEnd };
+    };
+
+    const activeIntervals: ActiveInterval[] = [];
+    for (const e of windowEvents) {
+      const span = parseSpan(e.start_ts, e.end_ts);
+      if (!span) continue;
+      const app = asString(e?.data?.app) || asString(e?.source) || "unknown";
+      const title = asString(e?.data?.title);
+      const workspace = asString(e?.data?.workspace) || asString(e?.data?.workspace_id) || "?";
+      const category = classifyActiveCategory(app, title);
+      activeIntervals.push({ ...span, app, title, workspace, category });
+    }
+    activeIntervals.sort((a, b) => a.start - b.start || a.end - b.end);
+
+    const visibleIntervals: VisibleInterval[] = [];
+    for (const e of visibleEvents) {
+      const span = parseSpan(e.start_ts, e.end_ts);
+      if (!span) continue;
+      const app = asString(e?.data?.app) || asString(e?.source) || "unknown";
+      const title = asString(e?.data?.title);
+      const workspace = asString(e?.data?.workspace) || asString(e?.data?.workspace_id) || "?";
+      visibleIntervals.push({ ...span, app, title, workspace });
+    }
+    visibleIntervals.sort((a, b) => a.start - b.start || a.end - b.end);
+
+    const workspaceIntervals: WorkspaceInterval[] = [];
+    for (const e of workspaceEvents) {
+      const span = parseSpan(e.start_ts, e.end_ts);
+      if (!span) continue;
+      const ws = asString(e?.data?.workspace) || asString(e?.data?.workspace_id) || "?";
+      const setup = monitorSetupFromData(
+        (e?.data && typeof e.data === "object" ? e.data : undefined) as Record<string, unknown> | undefined
+      );
+      workspaceIntervals.push({ ...span, workspace: ws, setup: setup || "unknown" });
+    }
+    workspaceIntervals.sort((a, b) => a.start - b.start || a.end - b.end);
+
+    const afkIntervals: AfkInterval[] = [];
+    for (const e of idleEvents) {
+      const span = parseSpan(e.start_ts, e.end_ts);
+      if (!span) continue;
+      const afkRaw = e?.data?.afk;
+      const afk =
+        typeof afkRaw === "boolean"
+          ? afkRaw
+          : ["1", "true", "yes"].includes(String(afkRaw || "").trim().toLowerCase());
+      if (!afk) continue;
+      afkIntervals.push(span);
+    }
+    afkIntervals.sort((a, b) => a.start - b.start || a.end - b.end);
+
+    const afkOverlapSecondsInRange = (startMs: number, endMs: number): number => {
+      if (endMs <= startMs || !afkIntervals.length) return 0;
+      let total = 0;
+      for (const a of afkIntervals) {
+        if (a.end <= startMs) continue;
+        if (a.start >= endMs) break;
+        total += overlapSeconds(startMs, endMs, a.start, a.end);
+      }
+      return total;
+    };
+
+    const rowTotalsMap = new Map<string, number>();
+    const colTotalsMap = new Map<string, number>();
+    const pairMap = new Map<string, Map<string, number>>();
+    let pairTotal = 0;
+    let visStartIdx = 0;
+    for (const active of activeIntervals) {
+      while (visStartIdx < visibleIntervals.length && visibleIntervals[visStartIdx].end <= active.start) {
+        visStartIdx += 1;
+      }
+      for (let j = visStartIdx; j < visibleIntervals.length && visibleIntervals[j].start < active.end; j += 1) {
+        const visible = visibleIntervals[j];
+        const overlap = overlapSeconds(active.start, active.end, visible.start, visible.end);
+        if (overlap <= 0) continue;
+        const activeApp = active.app || "unknown";
+        const visibleApp = visible.app || "unknown";
+        const row = pairMap.get(activeApp) || new Map<string, number>();
+        row.set(visibleApp, (row.get(visibleApp) || 0) + overlap);
+        pairMap.set(activeApp, row);
+        rowTotalsMap.set(activeApp, (rowTotalsMap.get(activeApp) || 0) + overlap);
+        colTotalsMap.set(visibleApp, (colTotalsMap.get(visibleApp) || 0) + overlap);
+        pairTotal += overlap;
+      }
+    }
+
+    const coActiveApps = Array.from(rowTotalsMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 14)
+      .map(([app]) => app);
+    const coVisibleApps = Array.from(colTotalsMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 14)
+      .map(([app]) => app);
+    const coSeconds = coActiveApps.map((activeApp) => coVisibleApps.map((visibleApp) => pairMap.get(activeApp)?.get(visibleApp) || 0));
+    const coRowTotals = coActiveApps.map((activeApp) => rowTotalsMap.get(activeApp) || 0);
+    const coColTotals = coVisibleApps.map((visibleApp) => colTotalsMap.get(visibleApp) || 0);
+    const coMaxCell = coSeconds.reduce((m, row) => Math.max(m, ...row, 0), 0);
+    const coTotal = coSeconds.reduce((sum, row) => sum + row.reduce((s, v) => s + v, 0), 0);
+    const coPairsFlat: Array<{ activeApp: string; visibleApp: string; seconds: number; sharePct: number }> = [];
+    for (const [activeApp, row] of pairMap.entries()) {
+      for (const [visibleApp, seconds] of row.entries()) {
+        if (seconds <= 0) continue;
+        coPairsFlat.push({
+          activeApp,
+          visibleApp,
+          seconds,
+          sharePct: pairTotal > 0 ? (seconds / pairTotal) * 100 : 0
+        });
+      }
+    }
+    coPairsFlat.sort((a, b) => b.seconds - a.seconds);
+    const coOccurrenceMatrix: AppCoOccurrenceMatrix = {
+      activeApps: coActiveApps,
+      visibleApps: coVisibleApps,
+      seconds: coSeconds,
+      rowTotals: coRowTotals,
+      colTotals: coColTotals,
+      maxCellSeconds: coMaxCell,
+      totalSeconds: coTotal,
+      topPairs: coPairsFlat.slice(0, 24)
+    };
+
+    type DailyAgg = {
+      startMs: number;
+      label: string;
+      singleSeconds: number;
+      multiSeconds: number;
+      unknownSeconds: number;
+      visibleWindowSeconds: number;
+      openAppSeconds: number;
+      totalSeconds: number;
+    };
+    const dayMap = new Map<number, DailyAgg>();
+    const dayStart = (ms: number): number => {
+      const d = new Date(ms);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    };
+    const ensureDay = (startMs: number): DailyAgg => {
+      let row = dayMap.get(startMs);
+      if (!row) {
+        row = {
+          startMs,
+          label: new Date(startMs).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" }),
+          singleSeconds: 0,
+          multiSeconds: 0,
+          unknownSeconds: 0,
+          visibleWindowSeconds: 0,
+          openAppSeconds: 0,
+          totalSeconds: 0
+        };
+        dayMap.set(startMs, row);
+      }
+      return row;
+    };
+    const addDaily = (startMs: number, endMs: number, apply: (row: DailyAgg, sec: number) => void): void => {
+      let cur = startMs;
+      while (cur < endMs) {
+        const dStart = dayStart(cur);
+        const dEnd = dStart + 86_400_000;
+        const segEnd = Math.min(endMs, dEnd);
+        const sec = (segEnd - cur) / 1000;
+        if (sec > 0) apply(ensureDay(dStart), sec);
+        if (segEnd <= cur) break;
+        cur = segEnd;
+      }
+    };
+    for (const ws of workspaceIntervals) {
+      addDaily(ws.start, ws.end, (row, sec) => {
+        row.totalSeconds += sec;
+        if (ws.setup === "single") row.singleSeconds += sec;
+        else if (ws.setup === "multi") row.multiSeconds += sec;
+        else row.unknownSeconds += sec;
+      });
+    }
+    for (const v of visibleIntervals) {
+      addDaily(v.start, v.end, (row, sec) => {
+        row.visibleWindowSeconds += sec;
+      });
+    }
+    for (const e of appOpenEvents) {
+      const span = parseSpan(e.start_ts, e.end_ts);
+      if (!span) continue;
+      let count = asNumber(e?.data?.count);
+      if (count <= 0 && Array.isArray(e?.data?.apps)) count = e.data.apps.length;
+      if (count <= 0) count = 1;
+      addDaily(span.start, span.end, (row, sec) => {
+        row.openAppSeconds += sec * count;
+      });
+    }
+    const dailyMonitorSplitRows: DailyMonitorSplitRow[] = Array.from(dayMap.values())
+      .sort((a, b) => a.startMs - b.startMs)
+      .map((row) => ({
+        id: String(row.startMs),
+        label: row.label,
+        singleSeconds: row.singleSeconds,
+        multiSeconds: row.multiSeconds,
+        unknownSeconds: row.unknownSeconds,
+        visibleWindowSeconds: row.visibleWindowSeconds,
+        openAppSeconds: row.openAppSeconds,
+        totalSeconds: row.totalSeconds
+      }));
+
+    const flowMap = new Map<string, { from: string; to: string; count: number; workspacePathCounts: Map<string, number> }>();
+    const flowGapMs = 20 * 60_000;
+    let totalFlows = 0;
+    for (let i = 1; i < activeIntervals.length; i += 1) {
+      const prev = activeIntervals[i - 1];
+      const cur = activeIntervals[i];
+      if (cur.start - prev.end > flowGapMs) continue;
+      if (!prev.app || !cur.app || prev.app === cur.app) continue;
+      const id = `${prev.app}=>${cur.app}`;
+      const item = flowMap.get(id) || {
+        from: prev.app,
+        to: cur.app,
+        count: 0,
+        workspacePathCounts: new Map<string, number>()
+      };
+      item.count += 1;
+      const path = `${workspaceLabel(prev.workspace)} -> ${workspaceLabel(cur.workspace)}`;
+      item.workspacePathCounts.set(path, (item.workspacePathCounts.get(path) || 0) + 1);
+      flowMap.set(id, item);
+      totalFlows += 1;
+    }
+    const appFlowEdges: AppFlowEdge[] = Array.from(flowMap.entries())
+      .map(([id, edge]) => {
+        let topWorkspacePath = "n/a";
+        let topCount = 0;
+        for (const [path, count] of edge.workspacePathCounts.entries()) {
+          if (count > topCount) {
+            topCount = count;
+            topWorkspacePath = path;
+          }
+        }
+        return {
+          id,
+          from: edge.from,
+          to: edge.to,
+          count: edge.count,
+          sharePct: totalFlows > 0 ? (edge.count / totalFlows) * 100 : 0,
+          topWorkspacePath
+        };
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20);
+
+    const labels = [...MIXED_CATEGORY_ORDER];
+    const idxByCategory = new Map<MixedCategory, number>();
+    labels.forEach((c, idx) => idxByCategory.set(c, idx));
+    const markovCounts = Array.from({ length: labels.length }, () => new Array<number>(labels.length).fill(0));
+    for (let i = 1; i < activeIntervals.length; i += 1) {
+      const prev = activeIntervals[i - 1];
+      const cur = activeIntervals[i];
+      if (cur.start - prev.end > flowGapMs) continue;
+      const from = prev.category;
+      const to = cur.category;
+      const fi = idxByCategory.get(from);
+      const ti = idxByCategory.get(to);
+      if (fi == null || ti == null) continue;
+      markovCounts[fi][ti] += 1;
+    }
+    const markovRowTotals = markovCounts.map((row) => row.reduce((sum, v) => sum + v, 0));
+    const markovColTotals = labels.map((_, col) => markovCounts.reduce((sum, row) => sum + (row[col] || 0), 0));
+    const markovMax = markovCounts.reduce((m, row) => Math.max(m, ...row, 0), 0);
+    const markovTotal = markovRowTotals.reduce((sum, v) => sum + v, 0);
+    const topTransitions: Array<{ from: MixedCategory; to: MixedCategory; count: number; rowProbPct: number; sharePct: number }> = [];
+    for (let i = 0; i < labels.length; i += 1) {
+      for (let j = 0; j < labels.length; j += 1) {
+        const count = markovCounts[i][j];
+        if (count <= 0) continue;
+        topTransitions.push({
+          from: labels[i],
+          to: labels[j],
+          count,
+          rowProbPct: markovRowTotals[i] > 0 ? (count / markovRowTotals[i]) * 100 : 0,
+          sharePct: markovTotal > 0 ? (count / markovTotal) * 100 : 0
+        });
+      }
+    }
+    topTransitions.sort((a, b) => b.count - a.count);
+    const categoryTransitionMatrix: CategoryTransitionMatrix = {
+      labels: markovTotal > 0 ? labels : [],
+      counts: markovTotal > 0 ? markovCounts : [],
+      rowTotals: markovTotal > 0 ? markovRowTotals : [],
+      colTotals: markovTotal > 0 ? markovColTotals : [],
+      maxCell: markovMax,
+      total: markovTotal,
+      topTransitions: topTransitions.slice(0, 16)
+    };
+
+    const usageSecondsByWorkspace = new Map<string, number>();
+    for (const ws of workspaceIntervals) {
+      const sec = Math.max(0, (ws.end - ws.start) / 1000);
+      if (sec <= 0) continue;
+      usageSecondsByWorkspace.set(ws.workspace, (usageSecondsByWorkspace.get(ws.workspace) || 0) + sec);
+    }
+    const switchesByWorkspace = new Map<string, number>();
+    const switchEventsInRange: Array<{ tsMs: number; to: string }> = [];
+    for (const e of workspaceSwitchEvents) {
+      const tsMs = Date.parse(e.start_ts || e.end_ts);
+      if (Number.isNaN(tsMs) || tsMs < fromMs || tsMs > toMs) continue;
+      const fromWs =
+        asString(e?.data?.from_workspace) || asString(e?.data?.prev_workspace) || asString(e?.data?.workspace) || "?";
+      const toWs = asString(e?.data?.to_workspace) || asString(e?.data?.workspace) || "?";
+      switchesByWorkspace.set(fromWs, (switchesByWorkspace.get(fromWs) || 0) + 1);
+      switchesByWorkspace.set(toWs, (switchesByWorkspace.get(toWs) || 0) + 1);
+      switchEventsInRange.push({ tsMs, to: toWs });
+    }
+    switchEventsInRange.sort((a, b) => a.tsMs - b.tsMs);
+
+    const workspaceKeys = Array.from(new Set([...usageSecondsByWorkspace.keys(), ...switchesByWorkspace.keys()])).sort(
+      compareWorkspaceIds
+    );
+    const workspaceUsageRows: WorkspaceUsageOverlayRow[] = workspaceKeys
+      .map((ws) => {
+        const seconds = usageSecondsByWorkspace.get(ws) || 0;
+        const switches = switchesByWorkspace.get(ws) || 0;
+        const switchesPerHour = seconds > 0 ? switches / (seconds / 3600) : 0;
+        return {
+          id: ws,
+          label: workspaceLabel(ws),
+          seconds,
+          switches,
+          switchesPerHour
+        };
+      })
+      .filter((row) => row.seconds > 0 || row.switches > 0);
+
+    const switchingCostAgg = new Map<string, { costs: number[]; churnTotal: number }>();
+    const stableThresholdSec = 180;
+    const horizonSec = 15 * 60;
+    let activeIdx = 0;
+    for (const sw of switchEventsInRange) {
+      const horizonEndMs = Math.min(toMs, sw.tsMs + horizonSec * 1000);
+      while (activeIdx < activeIntervals.length && activeIntervals[activeIdx].end <= sw.tsMs) {
+        activeIdx += 1;
+      }
+
+      let currentApp = "";
+      let runSec = 0;
+      let churn = 0;
+      let lastSegEndMs = sw.tsMs;
+      let stableAtSec: number | null = null;
+
+      for (let j = activeIdx; j < activeIntervals.length && activeIntervals[j].start < horizonEndMs; j += 1) {
+        const segStart = Math.max(sw.tsMs, activeIntervals[j].start);
+        const segEnd = Math.min(horizonEndMs, activeIntervals[j].end);
+        if (segEnd <= segStart) continue;
+        const afkSec = afkOverlapSecondsInRange(segStart, segEnd);
+        const segSec = Math.max(0, (segEnd - segStart) / 1000 - afkSec);
+        if (segSec <= 0) continue;
+
+        const app = activeIntervals[j].app || "unknown";
+        if (app === currentApp && segStart <= lastSegEndMs + 20_000) {
+          runSec += segSec;
+        } else {
+          if (currentApp && app !== currentApp) churn += 1;
+          currentApp = app;
+          runSec = segSec;
+        }
+        lastSegEndMs = segEnd;
+
+        if (runSec >= stableThresholdSec) {
+          const overSec = runSec - stableThresholdSec;
+          const stableAtMs = segEnd - overSec * 1000;
+          stableAtSec = Math.max(0, (stableAtMs - sw.tsMs) / 1000);
+          break;
+        }
+      }
+
+      const costSec = stableAtSec != null ? stableAtSec : horizonSec;
+      const rec = switchingCostAgg.get(sw.to) || { costs: [], churnTotal: 0 };
+      rec.costs.push(costSec);
+      rec.churnTotal += churn;
+      switchingCostAgg.set(sw.to, rec);
+    }
+
+    const switchingCostRows: BarRow[] = Array.from(switchingCostAgg.entries())
+      .map(([workspace, rec]) => {
+        const avg = rec.costs.length ? rec.costs.reduce((sum, v) => sum + v, 0) / rec.costs.length : 0;
+        const med = median(rec.costs);
+        const churnAvg = rec.costs.length ? rec.churnTotal / rec.costs.length : 0;
+        return {
+          id: `switch-cost-${workspace}`,
+          label: workspaceLabel(workspace),
+          value: avg,
+          sub: `${rec.costs.length} switches · median ${fmtSecondsShort(med)} · churn ${Math.round(churnAvg * 100) / 100}`,
+          color: "linear-gradient(90deg, rgba(250,204,21,.8), rgba(234,88,12,.9))"
+        };
+      })
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 16);
+
+    let pulseStepMs = 3600_000;
+    if (range === "1w") pulseStepMs = 4 * 3600_000;
+    else if (range === "1m") pulseStepMs = 12 * 3600_000;
+    else if (range === "all") {
+      const raw = Math.max(3600_000, Math.ceil((toMs - fromMs) / 36));
+      const choices = [3600_000, 7200_000, 14_400_000, 21_600_000, 43_200_000, 86_400_000, 172_800_000, 604_800_000];
+      pulseStepMs = choices.find((v) => raw <= v) || raw;
+    }
+    const pulseBins: ProductivityPulseBin[] = [];
+    for (let s = fromMs; s < toMs; s += pulseStepMs) {
+      const e = Math.min(toMs, s + pulseStepMs);
+      pulseBins.push({
+        id: `${s}`,
+        label: workspaceBinLabel(range, s, pulseStepMs),
+        startMs: s,
+        endMs: e,
+        workSeconds: 0,
+        communicationSeconds: 0,
+        distractionSeconds: 0,
+        otherSeconds: 0,
+        afkSeconds: 0
+      });
+    }
+    const addToPulseBins = (startMs: number, endMs: number, add: (bin: ProductivityPulseBin, sec: number) => void): void => {
+      let cur = startMs;
+      while (cur < endMs) {
+        const idx = Math.max(0, Math.min(pulseBins.length - 1, Math.floor((cur - fromMs) / pulseStepMs)));
+        const bin = pulseBins[idx];
+        const segEnd = Math.min(endMs, bin.endMs);
+        const sec = (segEnd - cur) / 1000;
+        if (sec > 0) add(bin, sec);
+        if (segEnd <= cur) break;
+        cur = segEnd;
+      }
+    };
+    for (const a of activeIntervals) {
+      addToPulseBins(a.start, a.end, (bin, sec) => {
+        const pulseCat = mixedToPulseCategory(a.category);
+        if (pulseCat === "work") bin.workSeconds += sec;
+        else if (pulseCat === "communication") bin.communicationSeconds += sec;
+        else if (pulseCat === "distraction") bin.distractionSeconds += sec;
+        else bin.otherSeconds += sec;
+      });
+    }
+    for (const afk of afkIntervals) {
+      addToPulseBins(afk.start, afk.end, (bin, sec) => {
+        bin.afkSeconds += sec;
+      });
+    }
+    for (const bin of pulseBins) {
+      const duration = Math.max(1, (bin.endMs - bin.startMs) / 1000);
+      bin.afkSeconds = Math.max(0, Math.min(duration, bin.afkSeconds));
+      const activeTotal = bin.workSeconds + bin.communicationSeconds + bin.distractionSeconds + bin.otherSeconds;
+      const activeCap = Math.max(0, duration - bin.afkSeconds);
+      if (activeTotal > activeCap && activeTotal > 0) {
+        const scale = activeCap / activeTotal;
+        bin.workSeconds *= scale;
+        bin.communicationSeconds *= scale;
+        bin.distractionSeconds *= scale;
+        bin.otherSeconds *= scale;
+      }
+    }
+    const productivityPulseBins = pulseBins;
+
+    let densityStepMs = 10 * 60_000;
+    if (range === "1w") densityStepMs = 30 * 60_000;
+    else if (range === "1m") densityStepMs = 2 * 3600_000;
+    else if (range === "all") {
+      const raw = Math.max(30 * 60_000, Math.ceil((toMs - fromMs) / 120));
+      const choices = [10 * 60_000, 15 * 60_000, 30 * 60_000, 3600_000, 2 * 3600_000, 4 * 3600_000, 12 * 3600_000, 86_400_000];
+      densityStepMs = choices.find((v) => raw <= v) || raw;
+    }
+    const densityBinCount = Math.max(1, Math.ceil((toMs - fromMs) / densityStepMs));
+    const densityStarts = Array.from({ length: densityBinCount }, (_, idx) => fromMs + idx * densityStepMs);
+    const densityEnds = densityStarts.map((s) => Math.min(toMs, s + densityStepMs));
+    const tabWeighted = new Array(densityBinCount).fill(0);
+    const visibleWeighted = new Array(densityBinCount).fill(0);
+    const categoryWeighted = Array.from({ length: densityBinCount }, () => new Map<MixedCategory, number>());
+    const cpuSamples = Array.from({ length: densityBinCount }, () => [] as number[]);
+    const ramSamples = Array.from({ length: densityBinCount }, () => [] as number[]);
+
+    const addToDensityBins = (startMs: number, endMs: number, add: (idx: number, sec: number) => void): void => {
+      let cur = startMs;
+      while (cur < endMs) {
+        const idx = Math.max(0, Math.min(densityBinCount - 1, Math.floor((cur - fromMs) / densityStepMs)));
+        const segEnd = Math.min(endMs, densityEnds[idx]);
+        const sec = (segEnd - cur) / 1000;
+        if (sec > 0) add(idx, sec);
+        if (segEnd <= cur) break;
+        cur = segEnd;
+      }
+    };
+
+    for (const e of tabsEvents) {
+      const span = parseSpan(e.start_ts, e.end_ts);
+      if (!span) continue;
+      let count = asNumber(e?.data?.count);
+      if (count <= 0 && Array.isArray(e?.data?.tabs)) count = e.data.tabs.length;
+      if (count <= 0) continue;
+      addToDensityBins(span.start, span.end, (idx, sec) => {
+        tabWeighted[idx] += count * sec;
+      });
+    }
+    for (const v of visibleIntervals) {
+      addToDensityBins(v.start, v.end, (idx, sec) => {
+        visibleWeighted[idx] += sec;
+      });
+    }
+    for (const a of activeIntervals) {
+      addToDensityBins(a.start, a.end, (idx, sec) => {
+        const row = categoryWeighted[idx];
+        row.set(a.category, (row.get(a.category) || 0) + sec);
+      });
+    }
+    for (const e of systemEvents) {
+      const data = (e?.data && typeof e.data === "object" ? e.data : undefined) as Record<string, unknown> | undefined;
+      if (!data) continue;
+      const start = Date.parse(e.start_ts);
+      const end = Date.parse(e.end_ts);
+      const ts = !Number.isNaN(end) ? end : start;
+      if (Number.isNaN(ts) || ts < fromMs || ts > toMs) continue;
+      const idx = Math.max(0, Math.min(densityBinCount - 1, Math.floor((ts - fromMs) / densityStepMs)));
+      const cpu = Math.max(0, Math.min(100, asNumber(data.cpu_percent)));
+      let ram = asNumber(data.mem_percent);
+      if ((!Number.isFinite(ram) || ram <= 0) && asNumber(data.mem_total_bytes) > 0) {
+        ram = (asNumber(data.mem_used_bytes) / asNumber(data.mem_total_bytes)) * 100;
+      }
+      ram = Math.max(0, Math.min(100, Number.isFinite(ram) ? ram : 0));
+      cpuSamples[idx].push(cpu);
+      ramSamples[idx].push(ram);
+    }
+
+    const hexbinPoints: HexbinDensityPoint[] = [];
+    for (let idx = 0; idx < densityBinCount; idx += 1) {
+      const start = densityStarts[idx];
+      const end = densityEnds[idx];
+      const duration = Math.max(1, (end - start) / 1000);
+      const hasSignal =
+        tabWeighted[idx] > 0 || visibleWeighted[idx] > 0 || cpuSamples[idx].length > 0 || ramSamples[idx].length > 0;
+      if (!hasSignal) continue;
+      const avgTabs = tabWeighted[idx] / duration;
+      const avgVisible = visibleWeighted[idx] / duration;
+      const categoryMap = categoryWeighted[idx];
+      let dominantCategory: MixedCategory = "other";
+      let dominantSec = 0;
+      for (const [cat, sec] of categoryMap.entries()) {
+        if (sec > dominantSec) {
+          dominantSec = sec;
+          dominantCategory = cat;
+        }
+      }
+      hexbinPoints.push({
+        id: `${start}`,
+        tabsCount: avgTabs,
+        visibleWindows: avgVisible,
+        cpuPercent: cpuSamples[idx].length ? median(cpuSamples[idx]) : 0,
+        ramPercent: ramSamples[idx].length ? median(ramSamples[idx]) : 0,
+        category: dominantCategory
+      });
+    }
+
+    const triNodeWeights = new Map<string, number>();
+    const triNodeMeta = new Map<string, { type: TriGraphNodeType; raw: string; label: string }>();
+    const triEdgeWeights = new Map<string, TriGraphEdge>();
+
+    const triNodeId = (type: TriGraphNodeType, raw: string): string => `${type}:${String(raw || "").toLowerCase()}`;
+    const addTriNode = (type: TriGraphNodeType, raw: string, label: string, weight: number): string => {
+      const cleanRaw = String(raw || "").trim() || "unknown";
+      const id = triNodeId(type, cleanRaw);
+      triNodeWeights.set(id, (triNodeWeights.get(id) || 0) + Math.max(0, weight));
+      if (!triNodeMeta.has(id)) triNodeMeta.set(id, { type, raw: cleanRaw, label: trimLabel(label || cleanRaw, 42) });
+      return id;
+    };
+    const addTriEdge = (
+      kind: TriGraphEdgeKind,
+      fromType: TriGraphNodeType,
+      fromRaw: string,
+      fromLabel: string,
+      toType: TriGraphNodeType,
+      toRaw: string,
+      toLabel: string,
+      weight: number
+    ): void => {
+      const w = Math.max(0, weight);
+      if (w <= 0) return;
+      const fromId = addTriNode(fromType, fromRaw, fromLabel, w);
+      const toId = addTriNode(toType, toRaw, toLabel, w);
+      const edgeId = `${kind}:${fromId}->${toId}`;
+      const prev = triEdgeWeights.get(edgeId);
+      if (prev) prev.weight += w;
+      else triEdgeWeights.set(edgeId, { id: edgeId, kind, from: fromId, to: toId, weight: w });
+    };
+
+    for (const a of activeIntervals) {
+      const sec = Math.max(0, (a.end - a.start) / 1000);
+      if (sec <= 0) continue;
+      addTriEdge("app-workspace", "app", a.app, a.app, "workspace", a.workspace, workspaceLabel(a.workspace), sec);
+      if (isBrowserApp(a.app)) {
+        const host = extractHostFromTitle(a.title);
+        const domain = host ? baseDomainFromHost(host) : "";
+        if (domain) {
+          addTriEdge("app-domain", "app", a.app, a.app, "domain", domain, domain, sec);
+          addTriEdge("domain-workspace", "domain", domain, domain, "workspace", a.workspace, workspaceLabel(a.workspace), sec);
+        }
+      }
+    }
+    for (const v of visibleIntervals) {
+      const sec = Math.max(0, (v.end - v.start) / 1000) * 0.35;
+      if (sec <= 0) continue;
+      addTriEdge("app-workspace", "app", v.app, v.app, "workspace", v.workspace, workspaceLabel(v.workspace), sec);
+      if (isBrowserApp(v.app)) {
+        const host = extractHostFromTitle(v.title);
+        const domain = host ? baseDomainFromHost(host) : "";
+        if (domain) {
+          addTriEdge("app-domain", "app", v.app, v.app, "domain", domain, domain, sec);
+          addTriEdge("domain-workspace", "domain", domain, domain, "workspace", v.workspace, workspaceLabel(v.workspace), sec);
+        }
+      }
+    }
+    for (const e of tabsEvents) {
+      const span = parseSpan(e.start_ts, e.end_ts);
+      if (!span) continue;
+      const durationSec = (span.end - span.start) / 1000;
+      const tabsRaw = Array.isArray(e?.data?.tabs) ? e.data.tabs : [];
+      const tabs = tabsRaw.filter((tab) => tab && typeof tab === "object").slice(0, 120) as Record<string, unknown>[];
+      if (!tabs.length || durationSec <= 0) continue;
+      const app = asString(e?.data?.browser) || asString(e?.source) || "browser";
+      const workspace = asString(e?.data?.workspace) || asString(e?.data?.workspace_id) || "?";
+      const perTabSec = durationSec / tabs.length;
+      for (const tab of tabs) {
+        const domain = tabDomainFromTab(tab);
+        addTriEdge("app-domain", "app", app, app, "domain", domain, domain, perTabSec);
+        addTriEdge("domain-workspace", "domain", domain, domain, "workspace", workspace, workspaceLabel(workspace), perTabSec * 0.8);
+        addTriEdge("app-workspace", "app", app, app, "workspace", workspace, workspaceLabel(workspace), perTabSec * 0.25);
+      }
+    }
+
+    const nodesByType = (type: TriGraphNodeType): TriGraphNode[] =>
+      Array.from(triNodeMeta.entries())
+        .filter(([, meta]) => meta.type === type)
+        .map(([id, meta]) => ({
+          id,
+          type: meta.type,
+          raw: meta.raw,
+          label: meta.label,
+          weight: triNodeWeights.get(id) || 0
+        }))
+        .sort((a, b) => b.weight - a.weight);
+
+    const appNodesTop = nodesByType("app").slice(0, 12);
+    const domainNodesTop = nodesByType("domain").slice(0, 16);
+    const workspaceNodesTop = nodesByType("workspace")
+      .slice(0, 12)
+      .sort((a, b) => compareWorkspaceIds(a.raw, b.raw));
+
+    const allowedNodeIds = new Set<string>([
+      ...appNodesTop.map((n) => n.id),
+      ...domainNodesTop.map((n) => n.id),
+      ...workspaceNodesTop.map((n) => n.id)
+    ]);
+    const triEdges = Array.from(triEdgeWeights.values())
+      .filter((edge) => allowedNodeIds.has(edge.from) && allowedNodeIds.has(edge.to))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 80);
+    const maxTriEdgeWeight = triEdges.reduce((m, e) => Math.max(m, e.weight), 0);
+    const triGraph: TriGraphData = {
+      appNodes: appNodesTop,
+      domainNodes: domainNodesTop,
+      workspaceNodes: workspaceNodesTop,
+      edges: triEdges,
+      maxEdgeWeight: maxTriEdgeWeight
+    };
+
+    const entropyAppMap = new Map<string, Map<string, number>>();
+    const ensureEntropyRow = (workspace: string): Map<string, number> => {
+      let row = entropyAppMap.get(workspace);
+      if (!row) {
+        row = new Map<string, number>();
+        entropyAppMap.set(workspace, row);
+      }
+      return row;
+    };
+    for (const a of activeIntervals) {
+      const sec = Math.max(0, (a.end - a.start) / 1000);
+      if (sec <= 0) continue;
+      const row = ensureEntropyRow(a.workspace);
+      row.set(a.app, (row.get(a.app) || 0) + sec);
+    }
+    for (const v of visibleIntervals) {
+      const sec = Math.max(0, (v.end - v.start) / 1000) * 0.35;
+      if (sec <= 0) continue;
+      const row = ensureEntropyRow(v.workspace);
+      row.set(v.app, (row.get(v.app) || 0) + sec);
+    }
+
+    const switchCountForEntropy = new Map<string, number>();
+    for (const e of workspaceSwitchEvents) {
+      const tsMs = Date.parse(e.start_ts || e.end_ts);
+      if (Number.isNaN(tsMs) || tsMs < fromMs || tsMs > toMs) continue;
+      const fromWs =
+        asString(e?.data?.from_workspace) || asString(e?.data?.prev_workspace) || asString(e?.data?.workspace) || "?";
+      const toWs = asString(e?.data?.to_workspace) || asString(e?.data?.workspace) || "?";
+      switchCountForEntropy.set(fromWs, (switchCountForEntropy.get(fromWs) || 0) + 1);
+      switchCountForEntropy.set(toWs, (switchCountForEntropy.get(toWs) || 0) + 1);
+    }
+
+    const workspaceEntropyRows: WorkspaceEntropyRow[] = Array.from(entropyAppMap.entries())
+      .map(([workspace, appWeights]) => {
+        const values = Array.from(appWeights.values()).filter((v) => v > 0);
+        const totalSeconds = values.reduce((sum, v) => sum + v, 0);
+        const appCount = values.length;
+        let entropyBits = 0;
+        if (totalSeconds > 0) {
+          for (const v of values) {
+            const p = v / totalSeconds;
+            if (p > 0) entropyBits += -p * Math.log2(p);
+          }
+        }
+        const maxEntropy = appCount > 1 ? Math.log2(appCount) : 1;
+        const normalizedEntropy = appCount > 1 ? Math.max(0, Math.min(1, entropyBits / maxEntropy)) : 0;
+        const switches = switchCountForEntropy.get(workspace) || 0;
+        const switchesPerHour = totalSeconds > 0 ? switches / (totalSeconds / 3600) : 0;
+        return {
+          id: workspace,
+          label: workspaceLabel(workspace),
+          totalSeconds,
+          appCount,
+          entropyBits,
+          normalizedEntropy,
+          switches,
+          switchesPerHour
+        };
+      })
+      .filter((row) => row.totalSeconds > 0)
+      .sort((a, b) => compareWorkspaceIds(a.id, b.id))
+      .slice(0, 18);
+
+    return {
+      coOccurrenceMatrix,
+      dailyMonitorSplitRows,
+      appFlowEdges,
+      categoryTransitionMatrix,
+      workspaceUsageRows,
+      productivityPulseBins,
+      switchingCostRows,
+      hexbinPoints,
+      triGraph,
+      workspaceEntropyRows
+    };
+  }, [
+    windowRange,
+    range,
+    windowEvents,
+    visibleEvents,
+    workspaceEvents,
+    workspaceSwitchEvents,
+    tabsEvents,
+    appOpenEvents,
+    idleEvents,
+    systemEvents
+  ]);
+
+  const mixedHexDensity = useMemo<HexbinDensityMatrix>(() => {
+    const points = mixedInsights.hexbinPoints.filter((p) => mixedCategoryFilter === "all" || p.category === mixedCategoryFilter);
+    if (!points.length) return { cells: [], xBins: [], yBins: [], maxSamples: 0 };
+
+    const cellMap = new Map<string, { tabsBin: number; windowsBin: number; samples: number; cpu: number[]; ram: number[] }>();
+    for (const point of points) {
+      const tabsBin = Math.max(0, Math.floor(point.tabsCount / 5) * 5);
+      const windowsBin = Math.max(0, Math.floor(point.visibleWindows));
+      const key = `${tabsBin}|${windowsBin}`;
+      const cell = cellMap.get(key) || { tabsBin, windowsBin, samples: 0, cpu: [], ram: [] };
+      cell.samples += 1;
+      if (point.cpuPercent > 0) cell.cpu.push(point.cpuPercent);
+      if (point.ramPercent > 0) cell.ram.push(point.ramPercent);
+      cellMap.set(key, cell);
+    }
+
+    const cells: HexbinDensityCell[] = Array.from(cellMap.values())
+      .map((cell) => ({
+        id: `${cell.tabsBin}|${cell.windowsBin}`,
+        tabsBin: cell.tabsBin,
+        windowsBin: cell.windowsBin,
+        samples: cell.samples,
+        medianCpu: cell.cpu.length ? median(cell.cpu) : 0,
+        medianRam: cell.ram.length ? median(cell.ram) : 0
+      }))
+      .sort((a, b) => a.windowsBin - b.windowsBin || a.tabsBin - b.tabsBin);
+
+    const xBins = Array.from(new Set(cells.map((c) => c.tabsBin))).sort((a, b) => a - b);
+    const yBins = Array.from(new Set(cells.map((c) => c.windowsBin))).sort((a, b) => a - b);
+    const maxSamples = cells.reduce((m, c) => Math.max(m, c.samples), 0);
+    return { cells, xBins, yBins, maxSamples };
+  }, [mixedInsights.hexbinPoints, mixedCategoryFilter]);
 
   const visibleRows = useMemo<VisibleRow[]>(() => {
     const rows: VisibleRow[] = [];
@@ -2486,7 +4466,12 @@ export default function App() {
         </div>
         <div>
           <h3>Tabs</h3>
-          <DonutChart rows={categoriesTabsSlices} total={categories?.tabs_total_seconds || 0} title="tabs categories" />
+          <DonutChart
+            rows={categoriesTabsSlices}
+            total={categories?.tabs_total_seconds || 0}
+            title="tabs categories"
+            showCenterValue={false}
+          />
         </div>
       </div>
     </section>
@@ -2607,6 +4592,110 @@ export default function App() {
         </>
       )}
 
+      {page === "stats" && showTopic("mixed") ? (
+        <section className="card">
+          <div className="cardHd">
+            <h2>Gemischt</h2>
+          </div>
+          <div className="cardBd workspaceStack">
+            <div className="split2">
+              <div>
+                <h3>Active + Visible Co-Occurrence</h3>
+                <AppCoOccurrenceMatrixView matrix={mixedInsights.coOccurrenceMatrix} />
+              </div>
+              <div>
+                <h3>Single vs Multi pro Tag</h3>
+                <DailyMonitorSplitView rows={mixedInsights.dailyMonitorSplitRows} />
+              </div>
+            </div>
+
+            <div className="split2">
+              <div>
+                <h3>App-Flows (Top 20)</h3>
+                <AppFlowTopView edges={mixedInsights.appFlowEdges} />
+              </div>
+              <div>
+                <h3>Category Transition Matrix</h3>
+                <CategoryTransitionMatrixView matrix={mixedInsights.categoryTransitionMatrix} />
+              </div>
+            </div>
+
+            <div className="split2">
+              <div>
+                <h3>Workspace Usage + Wechsel-Overlay</h3>
+                <WorkspaceUsageOverlayView rows={mixedInsights.workspaceUsageRows} />
+              </div>
+              <div>
+                <h3>Wechselkosten nach Workspace-Switch</h3>
+                <HorizontalBars rows={mixedInsights.switchingCostRows} valueFormatter={(v) => fmtSeconds(v)} />
+                <div className="sub">Stabiler Fokus = mindestens 3 Minuten in derselben App</div>
+              </div>
+            </div>
+
+            <div>
+              <h3>Produktivitaetspuls</h3>
+              <ProductivityPulseView bins={mixedInsights.productivityPulseBins} />
+            </div>
+
+            <div className="split2">
+              <div>
+                <div className="mixedControlRow">
+                  <h3>2D-Dichte: Tabs vs sichtbare Fenster</h3>
+                  <div className="mixedControlButtons">
+                    <div className="wsFilterGroup">
+                      <button
+                        type="button"
+                        className={mixedHexMetric === "cpu" ? "pill active" : "pill"}
+                        onClick={() => setMixedHexMetric("cpu")}
+                      >
+                        CPU
+                      </button>
+                      <button
+                        type="button"
+                        className={mixedHexMetric === "ram" ? "pill active" : "pill"}
+                        onClick={() => setMixedHexMetric("ram")}
+                      >
+                        RAM
+                      </button>
+                    </div>
+                    <div className="wsFilterGroup">
+                      <button
+                        type="button"
+                        className={mixedCategoryFilter === "all" ? "pill active" : "pill"}
+                        onClick={() => setMixedCategoryFilter("all")}
+                      >
+                        all categories
+                      </button>
+                      {MIXED_CATEGORY_ORDER.map((cat) => (
+                        <button
+                          key={`mixed-cat-${cat}`}
+                          type="button"
+                          className={mixedCategoryFilter === cat ? "pill active" : "pill"}
+                          onClick={() => setMixedCategoryFilter(cat)}
+                        >
+                          {mixedCategoryLabel(cat)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <HexbinDensityView matrix={mixedHexDensity} metric={mixedHexMetric} />
+              </div>
+              <div>
+                <h3>App-Domain-Workspace Tri-Graph</h3>
+                <TriGraphView graph={mixedInsights.triGraph} />
+              </div>
+            </div>
+
+            <div>
+              <h3>Workspace Entropy</h3>
+              <WorkspaceEntropyView rows={mixedInsights.workspaceEntropyRows} />
+              <div className="sub">niedrig = thematisch sauber · hoch = gemischt/chaotischer</div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {page === "stats" && showTopic("websites") ? (
         <section className="card">
           <div className="cardHd">
@@ -2615,38 +4704,42 @@ export default function App() {
           <div className="cardBd split2">
             <div>
               <h3>Top by Time</h3>
-              <HorizontalBars
-                rows={websites.slice(0, 15).map((r) => ({
-                  id: r.site,
-                  label: r.site,
-                  value: r.seconds,
-                  sub: `${r.visits} visits`
-                }))}
-                valueFormatter={(v) => fmtSeconds(v)}
-              />
+              <div className="listScrollWrap">
+                <HorizontalBars
+                  rows={websites.slice(0, 15).map((r) => ({
+                    id: r.site,
+                    label: r.site,
+                    value: r.seconds,
+                    sub: `${r.visits} visits`
+                  }))}
+                  valueFormatter={(v) => fmtSeconds(v)}
+                />
+              </div>
             </div>
             <div>
               <h3>Details</h3>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Site</th>
-                    <th>Time</th>
-                    <th>Visits</th>
-                    <th>Last</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {websites.slice(0, 20).map((r) => (
-                    <tr key={r.site}>
-                      <td>{r.site}</td>
-                      <td>{fmtSeconds(r.seconds)}</td>
-                      <td>{r.visits}</td>
-                      <td>{fmtTs(r.lastTs)}</td>
+              <div className="tableScrollWrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Site</th>
+                      <th>Time</th>
+                      <th>Visits</th>
+                      <th>Last</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {websites.slice(0, 20).map((r) => (
+                      <tr key={r.site}>
+                        <td>{r.site}</td>
+                        <td>{fmtSeconds(r.seconds)}</td>
+                        <td>{r.visits}</td>
+                        <td>{fmtTs(r.lastTs)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -2776,38 +4869,127 @@ export default function App() {
               <div>
                 <h3>Connected When</h3>
                 {monitorInsights.monitorPeriods.length ? (
-                  <table className="monitorPeriodsTable">
-                    <thead>
-                      <tr>
-                        <th>Monitor</th>
-                        <th>Start</th>
-                        <th>End</th>
-                        <th>Duration</th>
-                        <th>Setup</th>
-                        <th>Max Count</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {monitorInsights.monitorPeriods.map((p, idx) => (
-                        <tr key={`${p.monitor}-${p.start}-${p.signature}-${idx}`}>
-                          <td className="monitorPeriodMonitors">{p.monitor}</td>
-                          <td>{fmtTs(p.start)}</td>
-                          <td>{fmtTs(p.end)}</td>
-                          <td>{fmtSeconds(p.durationSeconds)}</td>
-                          <td>
-                            <span className={`monitorSetupBadge ${p.setup}`}>{monitorSetupLabel(p.setup)}</span>
-                          </td>
-                          <td>
-                            <span className="monitorCountValue">{p.maxMonitorCount > 0 ? p.maxMonitorCount : "-"}</span>
-                          </td>
+                  <div className="monitorPeriodsWrap">
+                    <table className="monitorPeriodsTable">
+                      <thead>
+                        <tr>
+                          <th>Monitor</th>
+                          <th>Start</th>
+                          <th>End</th>
+                          <th>Duration</th>
+                          <th>Setup</th>
+                          <th>Max Count</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {monitorInsights.monitorPeriods.map((p, idx) => (
+                          <tr key={`${p.monitor}-${p.start}-${p.signature}-${idx}`}>
+                            <td className="monitorPeriodMonitors">{p.monitor}</td>
+                            <td>{fmtTs(p.start)}</td>
+                            <td>{fmtTs(p.end)}</td>
+                            <td>{fmtSeconds(p.durationSeconds)}</td>
+                            <td>
+                              <span className={`monitorSetupBadge ${p.setup}`}>{monitorSetupLabel(p.setup)}</span>
+                            </td>
+                            <td>
+                              <span className="monitorCountValue">{p.maxMonitorCount > 0 ? p.maxMonitorCount : "-"}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
                   <div className="empty">No monitor setup periods.</div>
                 )}
               </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {page === "stats" && showTopic("system") ? (
+        <section className="card">
+          <div className="cardHd">
+            <h2>System Stats</h2>
+          </div>
+          <div className="cardBd workspaceStack">
+            <div className="split2">
+              <div>
+                <h3>CPU Load (%)</h3>
+                <MiniLineChart points={systemInsights.cpuSeries} />
+                <div className="sub" style={{ marginTop: 7 }}>
+                  avg: {fmtPct(systemInsights.avgCpu)} · peak: {fmtPct(systemInsights.peakCpu)}
+                </div>
+              </div>
+              <div>
+                <h3>RAM Usage (%)</h3>
+                <MiniLineChart points={systemInsights.memSeries} />
+                <div className="sub" style={{ marginTop: 7 }}>
+                  avg: {fmtPct(systemInsights.avgMem)} · peak: {fmtPct(systemInsights.peakMem)}
+                </div>
+              </div>
+            </div>
+
+            <div className="split2">
+              <div>
+                <h3>Network Download</h3>
+                <MiniLineChart points={systemInsights.netRxSeries} />
+              </div>
+              <div>
+                <h3>Network Upload</h3>
+                <MiniLineChart points={systemInsights.netTxSeries} />
+              </div>
+            </div>
+
+            <div className="split2">
+              <div>
+                <h3>Total Throughput</h3>
+                <MiniLineChart points={systemInsights.netTotalSeries} />
+                <div className="sub" style={{ marginTop: 7 }}>
+                  avg: {fmtMbps(systemInsights.avgNetTotalMbps)} · peak: {fmtMbps(systemInsights.peakNetTotalMbps)}
+                </div>
+              </div>
+              <div>
+                <h3>Active Network Interfaces</h3>
+                <HorizontalBars rows={systemInsights.ifaceRows} valueFormatter={(v) => fmtSeconds(v)} />
+              </div>
+            </div>
+
+            <div>
+              <h3>Latest Sample</h3>
+              {systemInsights.latest ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>CPU</th>
+                      <th>RAM</th>
+                      <th>Memory</th>
+                      <th>Net RX</th>
+                      <th>Net TX</th>
+                      <th>Net Total</th>
+                      <th>Interfaces</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{fmtTs(systemInsights.latest.ts)}</td>
+                      <td>{fmtPct(systemInsights.latest.cpuPercent)}</td>
+                      <td>{fmtPct(systemInsights.latest.memPercent)}</td>
+                      <td>
+                        {fmtBytes(systemInsights.latest.memUsedBytes)} / {fmtBytes(systemInsights.latest.memTotalBytes)}
+                      </td>
+                      <td>{fmtMbps(systemInsights.latest.netRxMbps)}</td>
+                      <td>{fmtMbps(systemInsights.latest.netTxMbps)}</td>
+                      <td>{fmtMbps(systemInsights.latest.netTotalMbps)}</td>
+                      <td>{systemInsights.latest.interfaces.length ? systemInsights.latest.interfaces.join(", ") : "-"}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              ) : (
+                <div className="empty">No system metrics in this range.</div>
+              )}
             </div>
           </div>
         </section>
@@ -2829,6 +5011,7 @@ export default function App() {
                 rows={tabDomainSlices}
                 total={tabDomainSlices.reduce((sum, r) => sum + r.seconds, 0)}
                 title="tab domains"
+                showCenterValue={false}
               />
             </div>
           </div>

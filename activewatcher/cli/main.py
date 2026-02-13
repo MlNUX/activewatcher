@@ -7,7 +7,7 @@ from typing import Optional
 
 import typer
 
-from activewatcher.common.config import default_db_path, default_server_url
+from activewatcher.common import config as app_config
 
 app = typer.Typer(add_completion=False)
 watch_app = typer.Typer(add_completion=False)
@@ -18,7 +18,7 @@ app.add_typer(watch_app, name="watch")
 def server(
     host: str = typer.Option("127.0.0.1"),
     port: int = typer.Option(8712),
-    db_path: Path = typer.Option(default_db_path()),
+    db_path: Path = typer.Option(app_config.default_db_path()),
     log_level: str = typer.Option("info"),
 ) -> None:
     import uvicorn
@@ -31,21 +31,53 @@ def server(
 
 @watch_app.command("hyprland")
 def watch_hyprland(
-    server_url: str = typer.Option(default_server_url()),
-    source: str = typer.Option("hyprland"),
-    debounce_ms: int = typer.Option(120),
-    title_max_len: int = typer.Option(200),
-    heartbeat_seconds: int = typer.Option(30),
-    track_focused: bool = typer.Option(True, help="Track the focused window (bucket=window)."),
+    server_url: str = typer.Option(app_config.default_server_url()),
+    source: str = typer.Option(
+        app_config.config_str(("watch", "hyprland", "source"), env_var="ACTIVEWATCHER_HYPRLAND_SOURCE", default="hyprland")
+    ),
+    debounce_ms: int = typer.Option(
+        app_config.config_int(
+            ("watch", "hyprland", "debounce_ms"), env_var="ACTIVEWATCHER_HYPRLAND_DEBOUNCE_MS", default=120
+        )
+    ),
+    title_max_len: int = typer.Option(
+        app_config.config_int(
+            ("watch", "hyprland", "title_max_len"), env_var="ACTIVEWATCHER_HYPRLAND_TITLE_MAX_LEN", default=200
+        )
+    ),
+    heartbeat_seconds: int = typer.Option(
+        app_config.config_int(
+            ("watch", "hyprland", "heartbeat_seconds"),
+            env_var="ACTIVEWATCHER_HYPRLAND_HEARTBEAT_SECONDS",
+            default=30,
+        )
+    ),
+    track_focused: bool = typer.Option(
+        app_config.config_bool(("watch", "hyprland", "track_focused"), env_var="ACTIVEWATCHER_TRACK_FOCUSED", default=True),
+        help="Track the focused window (bucket=window).",
+    ),
     track_visible_windows: bool = typer.Option(
-        False, help="Track all visible windows (bucket=window_visible)."
+        app_config.config_bool(
+            ("watch", "hyprland", "track_visible_windows"),
+            env_var="ACTIVEWATCHER_TRACK_VISIBLE_WINDOWS",
+            default=False,
+        ),
+        help="Track all visible windows (bucket=window_visible).",
     ),
     visible_all_monitors: bool = typer.Option(
-        False, help="When tracking visible windows, include all monitors (default: focused monitor only)."
+        app_config.config_bool(
+            ("watch", "hyprland", "visible_all_monitors"),
+            env_var="ACTIVEWATCHER_VISIBLE_ALL_MONITORS",
+            default=False,
+        ),
+        help="When tracking visible windows, include all monitors (default: focused monitor only).",
     ),
-    track_open_apps: bool = typer.Option(False, help="Track all open apps (bucket=app_open)."),
+    track_open_apps: bool = typer.Option(
+        app_config.config_bool(("watch", "hyprland", "track_open_apps"), env_var="ACTIVEWATCHER_TRACK_OPEN_APPS", default=False),
+        help="Track all open apps (bucket=app_open).",
+    ),
     track_workspaces: bool = typer.Option(
-        True,
+        app_config.config_bool(("watch", "hyprland", "track_workspaces"), env_var="ACTIVEWATCHER_TRACK_WORKSPACES", default=True),
         help="Track workspace switches (bucket=workspace) and switch events (bucket=workspace_switch).",
     ),
 ) -> None:
@@ -69,13 +101,30 @@ def watch_hyprland(
 
 @watch_app.command("idle")
 def watch_idle(
-    server_url: str = typer.Option(default_server_url()),
-    source: str = typer.Option("logind"),
-    threshold_seconds: int = typer.Option(120),
-    poll_seconds: float = typer.Option(2.0),
-    heartbeat_seconds: int = typer.Option(30),
+    server_url: str = typer.Option(app_config.default_server_url()),
+    source: str = typer.Option(
+        app_config.config_str(("watch", "idle", "source"), env_var="ACTIVEWATCHER_IDLE_SOURCE", default="logind")
+    ),
+    threshold_seconds: int = typer.Option(
+        app_config.config_int(
+            ("watch", "idle", "threshold_seconds"), env_var="ACTIVEWATCHER_IDLE_THRESHOLD_SECONDS", default=120
+        )
+    ),
+    poll_seconds: float = typer.Option(
+        app_config.config_float(("watch", "idle", "poll_seconds"), env_var="ACTIVEWATCHER_IDLE_POLL_SECONDS", default=5.0)
+    ),
+    heartbeat_seconds: int = typer.Option(
+        app_config.config_int(
+            ("watch", "idle", "heartbeat_seconds"), env_var="ACTIVEWATCHER_IDLE_HEARTBEAT_SECONDS", default=30
+        )
+    ),
     lock_process: str = typer.Option(
-        "hyprlock",
+        app_config.config_str(
+            ("watch", "idle", "lock_process"),
+            env_var="ACTIVEWATCHER_IDLE_LOCK_PROCESS",
+            default="hyprlock",
+            allow_empty=True,
+        ),
         help='Treat as AFK while this process is running (set to "" to disable).',
     ),
 ) -> None:
@@ -93,9 +142,45 @@ def watch_idle(
     )
 
 
+@watch_app.command("system")
+def watch_system(
+    server_url: str = typer.Option(app_config.default_server_url()),
+    source: str = typer.Option(
+        app_config.config_str(("watch", "system", "source"), env_var="ACTIVEWATCHER_SYSTEM_SOURCE", default="system")
+    ),
+    poll_seconds: float = typer.Option(
+        app_config.config_float(
+            ("watch", "system", "poll_seconds"), env_var="ACTIVEWATCHER_SYSTEM_POLL_SECONDS", default=5.0
+        )
+    ),
+    heartbeat_seconds: int = typer.Option(
+        app_config.config_int(
+            ("watch", "system", "heartbeat_seconds"), env_var="ACTIVEWATCHER_SYSTEM_HEARTBEAT_SECONDS", default=30
+        )
+    ),
+    include_loopback: bool = typer.Option(
+        app_config.config_bool(
+            ("watch", "system", "include_loopback"), env_var="ACTIVEWATCHER_SYSTEM_INCLUDE_LOOPBACK", default=False
+        ),
+        help="Include loopback traffic (lo) in network metrics.",
+    ),
+) -> None:
+    from activewatcher.watchers import system as system_watcher
+
+    asyncio.run(
+        system_watcher.run(
+            server_url=server_url,
+            source=source,
+            poll_seconds=poll_seconds,
+            heartbeat_seconds=heartbeat_seconds,
+            include_loopback=include_loopback,
+        )
+    )
+
+
 @app.command()
 def events(
-    server_url: str = typer.Option(default_server_url()),
+    server_url: str = typer.Option(app_config.default_server_url()),
     bucket: Optional[str] = typer.Option(None),
     source: Optional[str] = typer.Option(None),
     from_ts: Optional[str] = typer.Option(None, "--from"),
@@ -122,7 +207,7 @@ def events(
 
 @app.command()
 def summary(
-    server_url: str = typer.Option(default_server_url()),
+    server_url: str = typer.Option(app_config.default_server_url()),
     from_ts: Optional[str] = typer.Option(None, "--from"),
     to_ts: Optional[str] = typer.Option(None, "--to"),
     chunk_seconds: int = typer.Option(300),

@@ -537,6 +537,7 @@ def chunk_timeline(
         afk = _sum_overlap(afk_ranges, cursor, chunk_end)
         if afk > runtime:
             afk = runtime
+        active = max(0.0, runtime - afk)
         unknown = max(0.0, bucket_sec - runtime)
         app_totals: dict[str, float] = {}
 
@@ -568,7 +569,7 @@ def chunk_timeline(
             {
                 "start_ts": to_rfc3339(cursor),
                 "end_ts": to_rfc3339(chunk_end),
-                "active_seconds": round(runtime, 3),
+                "active_seconds": round(active, 3),
                 "afk_seconds": round(afk, 3),
                 "unknown_seconds": round(unknown, 3),
                 "top_app": top_app,
@@ -604,13 +605,14 @@ def summary(
         [(it.start, it.end) for it in idle if bool(it.data.get("afk", False))]
     )
     afk_seconds = min(runtime_seconds, _sum_ranges(afk_ranges))
+    active_seconds = max(0.0, runtime_seconds - afk_seconds)
     unknown_seconds = max(0.0, total_seconds - runtime_seconds)
 
     return {
         "from_ts": to_rfc3339(from_dt),
         "to_ts": to_rfc3339(to_dt),
         "total_seconds": round(total_seconds, 3),
-        "active_seconds": round(runtime_seconds, 3),
+        "active_seconds": round(active_seconds, 3),
         "afk_seconds": round(afk_seconds, 3),
         "unknown_seconds": round(unknown_seconds, 3),
         "top_apps_mode": "active" if has_idle else "window",

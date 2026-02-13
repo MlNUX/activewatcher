@@ -2,6 +2,16 @@
   --bg0: #050912;
   --bg1: #091221;
   --bg2: #0f1d31;
+  --app-bg:
+    radial-gradient(1240px 780px at -12% -18%, rgba(45, 212, 191, 0.3), transparent 60%),
+    radial-gradient(1140px 740px at 112% -10%, rgba(56, 189, 248, 0.28), transparent 62%),
+    radial-gradient(960px 640px at 52% 120%, rgba(250, 204, 21, 0.22), transparent 58%),
+    radial-gradient(880px 580px at 88% 74%, rgba(249, 115, 22, 0.17), transparent 64%),
+    radial-gradient(760px 520px at 12% 80%, rgba(34, 197, 94, 0.14), transparent 66%),
+    linear-gradient(180deg, var(--bg0), var(--bg1) 52%, var(--bg2));
+  --panel-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012));
+  --panel-bg-strong: linear-gradient(180deg, rgba(255, 255, 255, 0.058), rgba(255, 255, 255, 0.018));
+  --glass-bg: linear-gradient(180deg, rgba(8, 18, 33, 0.88), rgba(8, 18, 33, 0.7));
   --surface: rgba(255, 255, 255, 0.055);
   --surface-strong: rgba(255, 255, 255, 0.09);
   --line: rgba(164, 197, 231, 0.22);
@@ -36,11 +46,8 @@ body {
   color: var(--ink);
   line-height: 1.35;
   font-family: "IBM Plex Sans", "Segoe UI", "Noto Sans", sans-serif;
-  background:
-    radial-gradient(1100px 680px at -10% -10%, rgba(46, 197, 179, 0.28), transparent 62%),
-    radial-gradient(1200px 760px at 110% -8%, rgba(251, 191, 36, 0.2), transparent 56%),
-    radial-gradient(900px 620px at 55% 120%, rgba(72, 138, 255, 0.2), transparent 58%),
-    linear-gradient(170deg, var(--bg0), var(--bg1) 48%, var(--bg2));
+  background: var(--app-bg);
+  background-attachment: fixed;
 }
 
 body::before {
@@ -48,12 +55,11 @@ body::before {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.22;
+  opacity: 0.14;
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
   background-size: 24px 24px;
-  mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.75), transparent 95%);
 }
 
 .page {
@@ -78,7 +84,7 @@ body::before {
   border-radius: var(--radius-xl);
   padding: 12px 14px;
   backdrop-filter: blur(10px);
-  background: linear-gradient(175deg, rgba(7, 16, 30, 0.84), rgba(15, 27, 42, 0.62));
+  background: var(--glass-bg);
   box-shadow: var(--shadow-soft);
 }
 
@@ -166,7 +172,7 @@ h3 {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, rgba(8, 18, 33, 0.86), rgba(8, 18, 33, 0.64));
+  background: var(--glass-bg);
   backdrop-filter: blur(8px);
   overflow-x: auto;
   flex-wrap: nowrap;
@@ -183,7 +189,7 @@ h3 {
 .card {
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
-  background: linear-gradient(178deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.018));
+  background: var(--panel-bg-strong);
   overflow: hidden;
   box-shadow: var(--shadow-card);
   animation: cardIn 220ms ease-out both;
@@ -197,7 +203,7 @@ h3 {
 .cardHd {
   padding: 11px 13px;
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.015));
+  background: var(--panel-bg);
 }
 
 .cardBd {
@@ -264,7 +270,7 @@ h3 {
 .kpi {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background: linear-gradient(165deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.03));
+  background: var(--panel-bg);
   padding: 11px;
   display: flex;
   align-items: center;
@@ -716,12 +722,8 @@ h3 {
   background: rgba(45, 212, 191, 0.82);
 }
 
-.barSegLegacy.afkOverlay {
-  position: absolute;
-  left: 0;
-  bottom: 0;
+.barSegLegacy.afk {
   background: rgba(247, 183, 51, 0.82);
-  mix-blend-mode: screen;
 }
 
 .timelineLabelsLegacy {
@@ -794,7 +796,7 @@ h3 {
   border: 1px solid rgba(166, 213, 255, 0.2);
   border-radius: 12px;
   padding: 10px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
+  background: var(--panel-bg);
 }
 
 .wsHeatmapLegend {
@@ -1015,11 +1017,69 @@ td {
   word-break: break-word;
 }
 
+.monitorPeriodsWrap,
+.tableScrollWrap {
+  max-height: min(44vh, 420px);
+  overflow: auto;
+  border: 1px solid rgba(166, 213, 255, 0.18);
+  border-radius: 12px;
+  background: var(--panel-bg);
+}
+
+.listScrollWrap {
+  max-height: min(44vh, 420px);
+  overflow: auto;
+  border: 1px solid rgba(166, 213, 255, 0.18);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  padding: 8px;
+}
+
+.monitorPeriodsWrap .monitorPeriodsTable,
+.tableScrollWrap table {
+  min-width: 100%;
+}
+
+.monitorPeriodsWrap thead th,
+.tableScrollWrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(9, 20, 34, 0.97);
+}
+
+.monitorPeriodsWrap::-webkit-scrollbar,
+.tableScrollWrap::-webkit-scrollbar,
+.listScrollWrap::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.monitorPeriodsWrap::-webkit-scrollbar-track,
+.tableScrollWrap::-webkit-scrollbar-track,
+.listScrollWrap::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.monitorPeriodsWrap::-webkit-scrollbar-thumb,
+.tableScrollWrap::-webkit-scrollbar-thumb,
+.listScrollWrap::-webkit-scrollbar-thumb {
+  background: rgba(125, 184, 238, 0.45);
+  border-radius: 999px;
+}
+
+.monitorPeriodsWrap,
+.tableScrollWrap,
+.listScrollWrap {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(125, 184, 238, 0.45) rgba(255, 255, 255, 0.05);
+}
+
 .wsMatrixWrap {
   border: 1px solid rgba(166, 213, 255, 0.18);
   border-radius: 12px;
   padding: 9px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
+  background: var(--panel-bg);
 }
 
 .wsMatrixNote {
@@ -1118,6 +1178,265 @@ td {
   padding-left: 2px;
 }
 
+.mixedStackWrap {
+  display: grid;
+  gap: 8px;
+}
+
+.mixedStackRow {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr) minmax(132px, auto);
+  align-items: center;
+  gap: 9px;
+}
+
+.mixedStackLabel {
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.mixedStackTrack {
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 213, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.mixedStackScale {
+  height: 100%;
+  display: flex;
+  min-width: 3px;
+}
+
+.mixedStackSeg {
+  height: 100%;
+}
+
+.mixedStackSeg.single {
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.78), rgba(94, 201, 255, 0.92));
+}
+
+.mixedStackSeg.multi {
+  background: linear-gradient(90deg, rgba(250, 204, 21, 0.86), rgba(185, 28, 28, 0.92));
+}
+
+.mixedStackSeg.unknown {
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.62), rgba(100, 116, 139, 0.82));
+}
+
+.mixedStackMeta {
+  text-align: right;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.mixedUsageTrack {
+  position: relative;
+  height: 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 213, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.mixedUsageTime {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.78), rgba(34, 211, 238, 0.93));
+}
+
+.mixedUsageSwitch {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, rgba(250, 204, 21, 0.72), rgba(234, 88, 12, 0.9));
+}
+
+.pulseWrap {
+  border: 1px solid rgba(166, 213, 255, 0.18);
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--panel-bg);
+}
+
+.pulseLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.pulseBars {
+  height: 188px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(10px, 1fr);
+  gap: 4px;
+  align-items: end;
+  border: 1px solid rgba(166, 213, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(8, 16, 28, 0.56);
+  padding: 7px 6px;
+}
+
+.pulseBarCol {
+  height: 100%;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column-reverse;
+  overflow: hidden;
+}
+
+.pulseSeg {
+  width: 100%;
+}
+
+.pulseSeg.work {
+  background: rgba(45, 212, 191, 0.9);
+}
+
+.pulseSeg.communication {
+  background: rgba(96, 165, 250, 0.92);
+}
+
+.pulseSeg.distraction {
+  background: rgba(250, 204, 21, 0.92);
+}
+
+.pulseSeg.other {
+  background: rgba(167, 139, 250, 0.85);
+}
+
+.pulseSeg.afk {
+  background: rgba(148, 163, 184, 0.8);
+}
+
+.pulseLabels {
+  margin-top: 8px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(10px, 1fr);
+  gap: 4px;
+}
+
+.pulseLabels span {
+  text-align: center;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.hexbinGrid .wsMatrixCell {
+  min-width: 32px;
+  height: 28px;
+}
+
+.hexbinAxisTag {
+  background: rgba(94, 201, 255, 0.12);
+  border-color: rgba(94, 201, 255, 0.34);
+  color: var(--ink);
+}
+
+.hexbinCell.empty {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(166, 213, 255, 0.1);
+}
+
+.hexbinCell.active .wsMatrixCellText {
+  color: rgba(247, 250, 255, 0.94);
+  font-size: 10px;
+}
+
+.mixedControlRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.mixedControlButtons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.triGraphWrap {
+  border: 1px solid rgba(166, 213, 255, 0.18);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.triGraphSvg {
+  display: block;
+  min-width: 920px;
+  width: 100%;
+}
+
+.triLaneLabel {
+  fill: rgba(221, 236, 255, 0.74);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.triEdge {
+  transition: stroke-opacity 120ms ease, filter 120ms ease;
+}
+
+.triEdge:hover {
+  stroke-opacity: 1;
+  filter: brightness(1.12);
+}
+
+.triNodeLabel {
+  fill: rgba(232, 244, 255, 0.92);
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.entropyTrack {
+  position: relative;
+  height: 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 213, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.entropyFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.8), rgba(94, 201, 255, 0.95));
+}
+
+.entropySwitch {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, rgba(250, 204, 21, 0.78), rgba(234, 88, 12, 0.92));
+}
+
 .inlineBarTrack {
   width: clamp(130px, 26vw, 220px);
   max-width: 100%;
@@ -1151,7 +1470,7 @@ td {
   display: block;
   border: 1px solid rgba(166, 213, 255, 0.2);
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01));
+  background: var(--panel-bg);
 }
 
 .axis {
@@ -1268,6 +1587,27 @@ td {
 
   .lineSvg {
     height: 206px;
+  }
+
+  .mixedStackRow {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .mixedStackMeta {
+    text-align: left;
+  }
+
+  .pulseBars {
+    height: 164px;
+  }
+
+  .mixedControlRow {
+    align-items: flex-start;
+  }
+
+  .triGraphSvg {
+    min-width: 760px;
   }
 
   .wsHeatmapCell {
