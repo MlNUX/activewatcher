@@ -19,7 +19,7 @@
       "id": "uni",
       "label": "Uni",
       "color": "#facc15",
-      "domains": ["kit.edu", "campus.kit.edu", "ilias", "moodle"],
+      "domains": ["moodle"],
       "titles": ["vorlesung", "ubung", "klausur", "praktikum", "tutorium"]
     },
     {
