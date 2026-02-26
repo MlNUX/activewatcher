@@ -4,12 +4,15 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from activewatcher.common import config as app_config
 from activewatcher.common.models import StateEvent
 from activewatcher.common.time import parse_rfc3339, to_utc, utcnow
 
@@ -22,7 +25,9 @@ def _parse_dt_param(value: str | None, *, default: datetime) -> datetime:
     try:
         return to_utc(parse_rfc3339(value))
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"invalid timestamp: {value}") from e
+        raise HTTPException(
+            status_code=422, detail=f"invalid timestamp: {value}"
+        ) from e
 
 
 def _frontend_dist_dir() -> Path:
@@ -32,14 +37,66 @@ def _frontend_dist_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
+def _normalize_origin(value: str) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw == "*":
+        return raw
+    parsed = urlsplit(raw)
+    if parsed.scheme not in ("http", "https"):
+        return None
+    if not parsed.netloc:
+        return None
+    if parsed.path not in ("", "/"):
+        return None
+    if parsed.query or parsed.fragment:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _cors_allow_origins() -> list[str]:
+    defaults = [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+        "http://127.0.0.1:8712",
+        "http://localhost:8712",
+    ]
+    configured = app_config.config_str_list(
+        ("server", "cors_origins"),
+        env_var="ACTIVEWATCHER_CORS_ORIGINS",
+        default=defaults,
+    )
+    out: list[str] = []
+    for origin in configured:
+        normalized = _normalize_origin(origin)
+        if normalized and normalized not in out:
+            out.append(normalized)
+    return out or defaults
+
+
+def _trusted_hosts() -> list[str]:
+    defaults = ["127.0.0.1", "localhost", "[::1]"]
+    configured = app_config.config_str_list(
+        ("server", "trusted_hosts"),
+        env_var="ACTIVEWATCHER_TRUSTED_HOSTS",
+        default=defaults,
+    )
+    out = [str(host).strip() for host in configured if str(host).strip()]
+    return out or defaults
+
+
 def create_app(db_path: str | Path) -> FastAPI:
     app = FastAPI(title="activewatcher", version="0.1.0")
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts())
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=_cors_allow_origins(),
         allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type"],
     )
 
     @app.on_event("startup")
@@ -63,7 +120,9 @@ def create_app(db_path: str | Path) -> FastAPI:
     has_frontend_build = frontend_index.is_file()
 
     if frontend_assets.is_dir():
-        app.mount("/ui/assets", StaticFiles(directory=frontend_assets), name="ui_assets")
+        app.mount(
+            "/ui/assets", StaticFiles(directory=frontend_assets), name="ui_assets"
+        )
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -75,7 +134,12 @@ def create_app(db_path: str | Path) -> FastAPI:
 
     @app.get("/meta")
     def meta() -> dict[str, Any]:
-        return {"name": "activewatcher", "health": "/health", "docs": "/docs", "ui": "/ui"}
+        return {
+            "name": "activewatcher",
+            "health": "/health",
+            "docs": "/docs",
+            "ui": "/ui",
+        }
 
     def _ui_response():
         if has_frontend_build:
@@ -163,7 +227,9 @@ def create_app(db_path: str | Path) -> FastAPI:
         now = utcnow()
         to_dt = _parse_dt_param(to_ts, default=now)
         from_dt = _parse_dt_param(from_ts, default=(to_dt - timedelta(hours=24)))
-        return reports.summary(conn, from_ts=from_dt, to_ts=to_dt, chunk_seconds=chunk_seconds)
+        return reports.summary(
+            conn, from_ts=from_dt, to_ts=to_dt, chunk_seconds=chunk_seconds
+        )
 
     @app.get("/v1/apps")
     def get_apps(
@@ -190,7 +256,9 @@ def create_app(db_path: str | Path) -> FastAPI:
         to_dt = _parse_dt_param(to_ts, default=now)
         from_dt = _parse_dt_param(from_ts, default=(to_dt - timedelta(days=365)))
         try:
-            return reports.heatmap(conn, from_ts=from_dt, to_ts=to_dt, tz=tz, mode=mode, apps=app)
+            return reports.heatmap(
+                conn, from_ts=from_dt, to_ts=to_dt, tz=tz, mode=mode, apps=app
+            )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
 
@@ -205,7 +273,66 @@ def create_app(db_path: str | Path) -> FastAPI:
         to_dt = _parse_dt_param(to_ts, default=now)
         from_dt = _parse_dt_param(from_ts, default=(to_dt - timedelta(hours=24)))
         try:
-            return reports.categories_summary(conn, from_ts=from_dt, to_ts=to_dt, mode=mode)
+            return reports.categories_summary(
+                conn, from_ts=from_dt, to_ts=to_dt, mode=mode
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.get("/v1/autotag/runs")
+    def get_autotag_runs(
+        limit: int = Query(50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return reports.list_autotag_runs(limit=limit)
+
+    @app.get("/v1/autotag/decisions")
+    def get_autotag_decisions(
+        run_id: str | None = Query(None),
+        decision_type: str | None = Query(None),
+        state: str | None = Query(None),
+        limit: int = Query(500, ge=1, le=5000),
+    ) -> dict[str, Any]:
+        try:
+            return reports.autotag_decisions(
+                run_id=run_id,
+                decision_type=decision_type,
+                state=state,
+                limit=limit,
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.get("/v1/autotag/generated")
+    def get_autotag_generated(
+        run_id: str | None = Query(None),
+    ) -> dict[str, Any]:
+        try:
+            return reports.autotag_generated(run_id=run_id)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.post("/v1/autotag/review-gate/approve")
+    def post_autotag_review_gate_approve(payload: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(payload.get("run_id") or "").strip()
+        approved_by = str(payload.get("approved_by") or "").strip()
+        allowed_drop_ids_raw = payload.get("allowed_category_drop_ids")
+        allowed_drop_ids: list[str] | None
+        if isinstance(allowed_drop_ids_raw, list):
+            allowed_drop_ids = [str(v) for v in allowed_drop_ids_raw]
+        else:
+            allowed_drop_ids = None
+        try:
+            return reports.approve_autotag_review_gate(
+                run_id=run_id,
+                approved_by=approved_by,
+                allowed_category_drop_ids=allowed_drop_ids,
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
 

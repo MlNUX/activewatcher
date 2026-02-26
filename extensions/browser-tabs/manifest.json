@@ -4,7 +4,12 @@
   "version": "0.1.0",
   "description": "Reports open tab counts to ActiveWatcher.",
   "permissions": ["tabs", "storage", "alarms"],
-  "host_permissions": ["http://127.0.0.1:8712/*", "http://localhost:8712/*"],
+  "host_permissions": [
+    "http://127.0.0.1:8712/*",
+    "http://localhost:8712/*",
+    "https://127.0.0.1:8712/*",
+    "https://localhost:8712/*"
+  ],
   "background": { "service_worker": "background.js" },
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "action": { "default_title": "ActiveWatcher Tabs" },

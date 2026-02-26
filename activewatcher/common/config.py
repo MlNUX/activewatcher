@@ -118,7 +118,36 @@ def _parse_str(value: Any, *, allow_empty: bool = False) -> str | None:
     return None
 
 
-def config_bool(path: str | tuple[str, ...], *, env_var: str | None = None, default: bool) -> bool:
+def _parse_str_list(value: Any, *, allow_empty: bool = False) -> list[str] | None:
+    if value is None:
+        return None
+
+    items: list[str] = []
+    if isinstance(value, str):
+        items = [part.strip() for part in value.split(",")]
+    elif isinstance(value, (list, tuple, set)):
+        items = [str(part).strip() for part in value]
+    else:
+        return None
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not item:
+            continue
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+
+    if out or allow_empty:
+        return out
+    return None
+
+
+def config_bool(
+    path: str | tuple[str, ...], *, env_var: str | None = None, default: bool
+) -> bool:
     if env_var:
         from_env = _parse_bool(os.environ.get(env_var))
         if from_env is not None:
@@ -129,7 +158,9 @@ def config_bool(path: str | tuple[str, ...], *, env_var: str | None = None, defa
     return default
 
 
-def config_int(path: str | tuple[str, ...], *, env_var: str | None = None, default: int) -> int:
+def config_int(
+    path: str | tuple[str, ...], *, env_var: str | None = None, default: int
+) -> int:
     if env_var:
         from_env = _parse_int(os.environ.get(env_var))
         if from_env is not None:
@@ -140,7 +171,9 @@ def config_int(path: str | tuple[str, ...], *, env_var: str | None = None, defau
     return default
 
 
-def config_float(path: str | tuple[str, ...], *, env_var: str | None = None, default: float) -> float:
+def config_float(
+    path: str | tuple[str, ...], *, env_var: str | None = None, default: float
+) -> float:
     if env_var:
         from_env = _parse_float(os.environ.get(env_var))
         if from_env is not None:
@@ -152,7 +185,11 @@ def config_float(path: str | tuple[str, ...], *, env_var: str | None = None, def
 
 
 def config_str(
-    path: str | tuple[str, ...], *, env_var: str | None = None, default: str, allow_empty: bool = False
+    path: str | tuple[str, ...],
+    *,
+    env_var: str | None = None,
+    default: str,
+    allow_empty: bool = False,
 ) -> str:
     if env_var:
         from_env = _parse_str(os.environ.get(env_var), allow_empty=allow_empty)
@@ -162,6 +199,23 @@ def config_str(
     if from_cfg is not None:
         return from_cfg
     return default
+
+
+def config_str_list(
+    path: str | tuple[str, ...],
+    *,
+    env_var: str | None = None,
+    default: list[str] | tuple[str, ...],
+    allow_empty: bool = False,
+) -> list[str]:
+    if env_var:
+        from_env = _parse_str_list(os.environ.get(env_var), allow_empty=allow_empty)
+        if from_env is not None:
+            return from_env
+    from_cfg = _parse_str_list(_config_value(path), allow_empty=allow_empty)
+    if from_cfg is not None:
+        return from_cfg
+    return [str(v).strip() for v in default if str(v).strip()]
 
 
 def default_db_path() -> Path:

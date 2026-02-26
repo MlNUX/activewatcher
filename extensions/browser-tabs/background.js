@@ -1,4 +1,5 @@
 const api = globalThis.browser ?? globalThis.chrome;
+const USE_PROMISE_API = Boolean(globalThis.browser);
 
 const DEFAULTS = {
   serverUrl: "http://127.0.0.1:8712",
@@ -8,12 +9,48 @@ const DEFAULTS = {
 let sendTimer = null;
 let lastPayload = "";
 
-function callApi(fn, ...args) {
+const ALLOWED_SERVER_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+const ALLOWED_SERVER_PORT = "8712";
+
+function normalizeServerUrl(rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  const host = String(parsed.hostname || "").trim().toLowerCase();
+  if (!ALLOWED_SERVER_HOSTS.has(host)) return null;
+  const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+  if (port !== ALLOWED_SERVER_PORT) return null;
+  return parsed.origin;
+}
+
+function callApi(target, method, ...args) {
+  const fn = target?.[method];
+  if (typeof fn !== "function") {
+    return Promise.reject(new Error(`Missing browser API method: ${method}`));
+  }
+
+  if (USE_PROMISE_API) {
+    try {
+      return Promise.resolve(fn.call(target, ...args));
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+
   return new Promise((resolve, reject) => {
     try {
-      fn(...args, (...res) => {
+      fn.call(target, ...args, (...res) => {
         const err = api?.runtime?.lastError;
-        if (err) return reject(err);
+        if (err) {
+          reject(new Error(String(err.message || err)));
+          return;
+        }
         resolve(res.length > 1 ? res : res[0]);
       });
     } catch (e) {
@@ -24,7 +61,7 @@ function callApi(fn, ...args) {
 
 async function getSettings() {
   try {
-    const data = await callApi(api.storage.local.get, DEFAULTS);
+    const data = await callApi(api.storage.local, "get", DEFAULTS);
     return { ...DEFAULTS, ...data };
   } catch {
     return { ...DEFAULTS };
@@ -40,7 +77,7 @@ function detectBrowserLabel() {
 }
 
 async function collectTabsSnapshot() {
-  const tabs = await callApi(api.tabs.query, {});
+  const tabs = await callApi(api.tabs, "query", {});
   const windowIds = new Set();
   let incognito = 0;
   let pinned = 0;
@@ -88,7 +125,7 @@ async function collectTabsSnapshot() {
 
 async function postState() {
   const settings = await getSettings();
-  const serverUrl = String(settings.serverUrl || DEFAULTS.serverUrl).replace(/\/+$/, "");
+  const serverUrl = normalizeServerUrl(settings.serverUrl) || DEFAULTS.serverUrl;
   const browserLabel =
     settings.browserLabel && settings.browserLabel !== "auto"
       ? String(settings.browserLabel)
@@ -113,14 +150,16 @@ async function postState() {
 
   const body = JSON.stringify(payload);
   if (body === lastPayload) return;
-  lastPayload = body;
 
   try {
-    await fetch(`${serverUrl}/v1/state`, {
+    const response = await fetch(`${serverUrl}/v1/state`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
     });
+    if (response.ok) {
+      lastPayload = body;
+    }
   } catch {
     // ignore network errors
   }

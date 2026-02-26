@@ -4,12 +4,14 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from activewatcher.common.categories import CategoryCatalog, category_catalog
-from activewatcher.common.config import default_stale_after_seconds
+from activewatcher.common.config import default_stale_after_seconds, xdg_data_home
 from activewatcher.common.time import parse_rfc3339, to_rfc3339, to_utc, utcnow
 
 
@@ -36,7 +38,9 @@ class Interval:
         }
 
 
-def _merge_ranges(ranges: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+def _merge_ranges(
+    ranges: list[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
     if not ranges:
         return []
     items = [(s, e) for s, e in ranges if e > s]
@@ -60,7 +64,9 @@ def _sum_ranges(ranges: list[tuple[datetime, datetime]]) -> float:
     return sum(max(0.0, (end - start).total_seconds()) for start, end in ranges)
 
 
-def _sum_overlap(ranges: list[tuple[datetime, datetime]], start: datetime, end: datetime) -> float:
+def _sum_overlap(
+    ranges: list[tuple[datetime, datetime]], start: datetime, end: datetime
+) -> float:
     if end <= start:
         return 0.0
     total = 0.0
@@ -136,7 +142,11 @@ def list_apps(
         if len(apps) >= max(1, min(5000, int(limit))):
             break
 
-    return {"from_ts": to_rfc3339(from_dt), "to_ts": to_rfc3339(to_dt), "apps": sorted(apps)}
+    return {
+        "from_ts": to_rfc3339(from_dt),
+        "to_ts": to_rfc3339(to_dt),
+        "apps": sorted(apps),
+    }
 
 
 def _add_seconds_by_local_day(
@@ -176,8 +186,12 @@ def heatmap(
     if mode_norm not in ("auto", "active", "window"):
         raise ValueError('mode must be one of: "auto", "active", "window"')
 
-    from_dt, to_dt, window = load_intervals(conn, bucket="window", source=None, from_ts=from_ts, to_ts=to_ts)
-    _, _, idle = load_intervals(conn, bucket="idle", source=None, from_ts=from_dt, to_ts=to_dt)
+    from_dt, to_dt, window = load_intervals(
+        conn, bucket="window", source=None, from_ts=from_ts, to_ts=to_ts
+    )
+    _, _, idle = load_intervals(
+        conn, bucket="idle", source=None, from_ts=from_dt, to_ts=to_dt
+    )
 
     has_idle = bool(idle)
     if mode_norm == "window":
@@ -286,7 +300,7 @@ def load_intervals(
         f"""
         SELECT id, bucket, source, start_ts, end_ts, last_seen_ts, data_json
           FROM events
-         WHERE {' AND '.join(where)}
+         WHERE {" AND ".join(where)}
          ORDER BY start_ts ASC
         """.strip(),
         tuple(params),
@@ -450,7 +464,9 @@ def build_timeline(
     for seg in segments[1:]:
         prev = merged[-1]
         if _segment_key(prev) == _segment_key(seg) and prev.end == seg.start:
-            merged[-1] = TimelineSegment(start=prev.start, end=seg.end, window=prev.window, afk=prev.afk)
+            merged[-1] = TimelineSegment(
+                start=prev.start, end=seg.end, window=prev.window, afk=prev.afk
+            )
         else:
             merged.append(seg)
     return merged
@@ -477,7 +493,9 @@ def top_apps_total(segments: list[TimelineSegment]) -> list[dict[str, Any]]:
             {
                 "app": app,
                 "seconds": round(seconds, 3),
-                "percent_window": round((seconds / total_window) * 100.0, 3) if total_window > 0 else 0.0,
+                "percent_window": round((seconds / total_window) * 100.0, 3)
+                if total_window > 0
+                else 0.0,
             }
         )
     return out
@@ -506,7 +524,9 @@ def top_apps_active(segments: list[TimelineSegment]) -> list[dict[str, Any]]:
             {
                 "app": app,
                 "seconds": round(seconds, 3),
-                "percent_active": round((seconds / total_active) * 100.0, 3) if total_active > 0 else 0.0,
+                "percent_active": round((seconds / total_active) * 100.0, 3)
+                if total_active > 0
+                else 0.0,
             }
         )
     return out
@@ -590,9 +610,15 @@ def summary(
     from_dt, to_dt, window = load_intervals(
         conn, bucket="window", source=None, from_ts=from_ts, to_ts=to_ts
     )
-    _, _, idle = load_intervals(conn, bucket="idle", source=None, from_ts=from_dt, to_ts=to_dt)
-    _, _, all_events = load_intervals(conn, bucket=None, source=None, from_ts=from_dt, to_ts=to_dt)
-    segments = build_timeline(from_dt=from_dt, to_dt=to_dt, window_intervals=window, idle_intervals=idle)
+    _, _, idle = load_intervals(
+        conn, bucket="idle", source=None, from_ts=from_dt, to_ts=to_dt
+    )
+    _, _, all_events = load_intervals(
+        conn, bucket=None, source=None, from_ts=from_dt, to_ts=to_dt
+    )
+    segments = build_timeline(
+        from_dt=from_dt, to_dt=to_dt, window_intervals=window, idle_intervals=idle
+    )
 
     apps_active = top_apps_active(segments)
     apps_total = top_apps_total(segments)
@@ -655,10 +681,14 @@ def _add_cat_named_seconds(
     per_cat[key] = per_cat.get(key, 0.0) + seconds
 
 
-def _top_named_rows(totals: dict[str, float], *, limit: int = 8) -> list[dict[str, Any]]:
+def _top_named_rows(
+    totals: dict[str, float], *, limit: int = 8
+) -> list[dict[str, Any]]:
     return [
         {"name": name, "seconds": round(sec, 3)}
-        for name, sec in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[: max(1, int(limit))]
+        for name, sec in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[
+            : max(1, int(limit))
+        ]
         if sec > 0
     ]
 
@@ -741,7 +771,9 @@ def _app_category_details_from_intervals(
     return out
 
 
-def _tabs_category_details(catalog: CategoryCatalog, intervals: list[Interval]) -> dict[str, dict[str, Any]]:
+def _tabs_category_details(
+    catalog: CategoryCatalog, intervals: list[Interval]
+) -> dict[str, dict[str, Any]]:
     domains_by_cat: dict[str, dict[str, float]] = {}
     titles_by_cat: dict[str, dict[str, float]] = {}
     browsers_by_cat: dict[str, dict[str, float]] = {}
@@ -758,15 +790,23 @@ def _tabs_category_details(catalog: CategoryCatalog, intervals: list[Interval]) 
         for tab in tabs:
             if not isinstance(tab, dict):
                 continue
-            url = str(tab.get("url") or tab.get("pending_url") or tab.get("pendingUrl") or "")
+            url = str(
+                tab.get("url") or tab.get("pending_url") or tab.get("pendingUrl") or ""
+            )
             title = str(tab.get("title") or "")
             cat = catalog.classify_tab(url=url, title=title, app=browser)
             domain = _tab_domain_from_url(url)
 
-            _add_cat_named_seconds(domains_by_cat, category=cat, name=domain, seconds=dur)
-            _add_cat_named_seconds(browsers_by_cat, category=cat, name=browser, seconds=dur)
+            _add_cat_named_seconds(
+                domains_by_cat, category=cat, name=domain, seconds=dur
+            )
+            _add_cat_named_seconds(
+                browsers_by_cat, category=cat, name=browser, seconds=dur
+            )
             if title:
-                _add_cat_named_seconds(titles_by_cat, category=cat, name=title, seconds=dur)
+                _add_cat_named_seconds(
+                    titles_by_cat, category=cat, name=title, seconds=dur
+                )
 
     out: dict[str, dict[str, Any]] = {}
     all_cats = set(domains_by_cat) | set(titles_by_cat) | set(browsers_by_cat)
@@ -779,7 +819,9 @@ def _tabs_category_details(catalog: CategoryCatalog, intervals: list[Interval]) 
     return out
 
 
-def _category_rows(catalog: CategoryCatalog, totals: dict[str, float]) -> tuple[list[dict[str, Any]], float]:
+def _category_rows(
+    catalog: CategoryCatalog, totals: dict[str, float]
+) -> tuple[list[dict[str, Any]], float]:
     total_seconds = sum(max(0.0, float(v)) for v in totals.values())
     rows: list[dict[str, Any]] = []
     for r in catalog.rules:
@@ -792,12 +834,18 @@ def _category_rows(catalog: CategoryCatalog, totals: dict[str, float]) -> tuple[
                 "label": r.label,
                 "color": r.color,
                 "seconds": round(sec, 3),
-                "percent": round((sec / total_seconds) * 100.0, 3) if total_seconds > 0 else 0.0,
+                "percent": round((sec / total_seconds) * 100.0, 3)
+                if total_seconds > 0
+                else 0.0,
             }
         )
     if not rows:
         meta = catalog.category_meta()
-        fallback = meta[-1] if meta else {"id": "other", "label": "Other", "color": "rgba(255,255,255,.45)"}
+        fallback = (
+            meta[-1]
+            if meta
+            else {"id": "other", "label": "Other", "color": "rgba(255,255,255,.45)"}
+        )
         rows = [
             {
                 "category": fallback["id"],
@@ -828,7 +876,9 @@ def _app_category_totals_from_segments(
     return totals
 
 
-def _app_category_totals_from_intervals(catalog: CategoryCatalog, intervals: list[Interval]) -> dict[str, float]:
+def _app_category_totals_from_intervals(
+    catalog: CategoryCatalog, intervals: list[Interval]
+) -> dict[str, float]:
     totals: dict[str, float] = {}
     for it in intervals:
         app = str(it.data.get("app") or "")
@@ -840,7 +890,9 @@ def _app_category_totals_from_intervals(catalog: CategoryCatalog, intervals: lis
     return totals
 
 
-def _tabs_category_totals(catalog: CategoryCatalog, intervals: list[Interval]) -> dict[str, float]:
+def _tabs_category_totals(
+    catalog: CategoryCatalog, intervals: list[Interval]
+) -> dict[str, float]:
     totals: dict[str, float] = {}
     for it in intervals:
         tabs = it.data.get("tabs")
@@ -884,15 +936,27 @@ def categories_summary(
         app_totals = _app_category_totals_from_intervals(catalog, visible)
         app_details = _app_category_details_from_intervals(catalog, visible)
     else:
-        from_dt, to_dt, window = load_intervals(conn, bucket="window", source=None, from_ts=from_ts, to_ts=to_ts)
-        _, _, idle = load_intervals(conn, bucket="idle", source=None, from_ts=from_dt, to_ts=to_dt)
-        segments = build_timeline(from_dt=from_dt, to_dt=to_dt, window_intervals=window, idle_intervals=idle)
+        from_dt, to_dt, window = load_intervals(
+            conn, bucket="window", source=None, from_ts=from_ts, to_ts=to_ts
+        )
+        _, _, idle = load_intervals(
+            conn, bucket="idle", source=None, from_ts=from_dt, to_ts=to_dt
+        )
+        segments = build_timeline(
+            from_dt=from_dt, to_dt=to_dt, window_intervals=window, idle_intervals=idle
+        )
         use_active = mode_norm == "active" or (mode_norm == "auto" and bool(idle))
         app_mode = "active" if use_active else "window"
-        app_totals = _app_category_totals_from_segments(catalog, segments, only_active=use_active)
-        app_details = _app_category_details_from_segments(catalog, segments, only_active=use_active)
+        app_totals = _app_category_totals_from_segments(
+            catalog, segments, only_active=use_active
+        )
+        app_details = _app_category_details_from_segments(
+            catalog, segments, only_active=use_active
+        )
 
-    _, _, tabs = load_intervals(conn, bucket="browser_tabs", source=None, from_ts=from_dt, to_ts=to_dt)
+    _, _, tabs = load_intervals(
+        conn, bucket="browser_tabs", source=None, from_ts=from_dt, to_ts=to_dt
+    )
     tabs_totals = _tabs_category_totals(catalog, tabs)
     tab_details = _tabs_category_details(catalog, tabs)
 
@@ -911,4 +975,381 @@ def categories_summary(
         "tabs": tab_rows,
         "app_details": app_details,
         "tab_details": tab_details,
+    }
+
+
+def _autotag_runs_dir() -> Path:
+    return xdg_data_home() / "activewatcher" / "autotag" / "runs"
+
+
+def _autotag_run_roots(*, limit: int = 50) -> list[Path]:
+    runs_dir = _autotag_runs_dir()
+    if not runs_dir.is_dir():
+        return []
+    out = [p for p in runs_dir.iterdir() if p.is_dir()]
+    out.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return out[: max(1, min(500, int(limit)))]
+
+
+def _read_json_file(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _read_jsonl_file(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s:
+                continue
+            value = json.loads(s)
+            if isinstance(value, dict):
+                out.append(value)
+    except Exception:
+        return []
+    return out
+
+
+def _file_sha256(path: Path) -> str:
+    h = sha256()
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _select_autotag_run_root(*, run_id: str | None, limit: int = 500) -> Path | None:
+    roots = _autotag_run_roots(limit=limit)
+    if run_id:
+        wanted = str(run_id)
+        for root in roots:
+            if root.name == wanted:
+                return root
+        raise FileNotFoundError(f"autotag run not found: {run_id}")
+    if roots:
+        return roots[0]
+    return None
+
+
+def _normalize_review_gate_drop_ids(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cat_id = str(value or "").strip().lower()
+        if not cat_id or cat_id in seen:
+            continue
+        seen.add(cat_id)
+        out.append(cat_id)
+    return out
+
+
+def _review_gate_payload_from_source(
+    *,
+    root: Path,
+    payload: dict[str, Any],
+    source: str,
+) -> dict[str, Any]:
+    return {
+        "source": source,
+        "run_id": str(payload.get("run_id") or root.name),
+        "approved": bool(payload.get("approved") or False),
+        "approved_by": str(payload.get("approved_by") or ""),
+        "approved_at": str(payload.get("approved_at") or ""),
+        "categories_generated_sha256": str(
+            payload.get("categories_generated_sha256") or ""
+        ),
+        "allowed_category_drop_ids": _normalize_review_gate_drop_ids(
+            payload.get("allowed_category_drop_ids")
+        ),
+    }
+
+
+def _read_autotag_review_gate(root: Path) -> dict[str, Any]:
+    review_gate = _read_json_file(root / "review-gate.json")
+    if review_gate:
+        return _review_gate_payload_from_source(
+            root=root,
+            payload=review_gate,
+            source="review-gate.json",
+        )
+
+    review_template = _read_json_file(root / "review-gate.template.json")
+    if review_template:
+        return _review_gate_payload_from_source(
+            root=root,
+            payload=review_template,
+            source="review-gate.template.json",
+        )
+
+    return {
+        "source": "missing",
+        "run_id": root.name,
+        "approved": False,
+        "approved_by": "",
+        "approved_at": "",
+        "categories_generated_sha256": "",
+        "allowed_category_drop_ids": [],
+    }
+
+
+def list_autotag_runs(*, limit: int = 50) -> dict[str, Any]:
+    roots = _autotag_run_roots(limit=limit)
+    rows: list[dict[str, Any]] = []
+    for root in roots:
+        metadata = _read_json_file(root / "run-metadata.json")
+        suggest_raw = metadata.get("suggest")
+        suggest: dict[str, Any] = suggest_raw if isinstance(suggest_raw, dict) else {}
+        pass_a_raw = suggest.get("pass_a")
+        pass_a: dict[str, Any] = pass_a_raw if isinstance(pass_a_raw, dict) else {}
+        pass_b_raw = suggest.get("pass_b")
+        pass_b: dict[str, Any] = pass_b_raw if isinstance(pass_b_raw, dict) else {}
+        evaluate_raw = metadata.get("evaluate")
+        evaluate: dict[str, Any] = (
+            evaluate_raw if isinstance(evaluate_raw, dict) else {}
+        )
+        review_gate = _read_autotag_review_gate(root)
+        decision_count = len(_read_jsonl_file(root / "autotag-decisions.jsonl"))
+        rows.append(
+            {
+                "run_id": root.name,
+                "created_at": str(metadata.get("created_at") or ""),
+                "from_ts": str(metadata.get("from_ts") or ""),
+                "to_ts": str(metadata.get("to_ts") or ""),
+                "decision_count": decision_count,
+                "categories_generated_sha256": str(
+                    suggest.get("categories_generated_sha256") or ""
+                ),
+                "pass_a_failed_batches": int(pass_a.get("failed_batches") or 0),
+                "pass_b_failed_batches": int(pass_b.get("failed_batches") or 0),
+                "pass_b_apply_blocked": bool(pass_b.get("apply_blocked") or False),
+                "pass_b_apply_block_reason": str(
+                    pass_b.get("apply_block_reason") or ""
+                ),
+                "recommend_apply": bool(evaluate.get("recommend_apply") or False),
+                "review_gate_approved": bool(review_gate.get("approved") or False),
+            }
+        )
+
+    latest_run_id = str(rows[0].get("run_id") or "") if rows else ""
+    return {
+        "runs": rows,
+        "latest_run_id": latest_run_id,
+    }
+
+
+def autotag_generated(*, run_id: str | None) -> dict[str, Any]:
+    selected = _select_autotag_run_root(run_id=run_id, limit=500)
+
+    if selected is None:
+        return {
+            "run_id": "",
+            "from_ts": "",
+            "to_ts": "",
+            "categories_generated_sha256": "",
+            "generated": {},
+            "review_gate": {
+                "source": "missing",
+                "run_id": "",
+                "approved": False,
+                "approved_by": "",
+                "approved_at": "",
+                "categories_generated_sha256": "",
+                "allowed_category_drop_ids": [],
+            },
+        }
+
+    metadata = _read_json_file(selected / "run-metadata.json")
+    suggest_raw = metadata.get("suggest")
+    suggest: dict[str, Any] = suggest_raw if isinstance(suggest_raw, dict) else {}
+    categories_sha = str(suggest.get("categories_generated_sha256") or "")
+    generated = _read_json_file(selected / "categories.generated.json")
+    review_gate = _read_autotag_review_gate(selected)
+
+    return {
+        "run_id": selected.name,
+        "from_ts": str(metadata.get("from_ts") or ""),
+        "to_ts": str(metadata.get("to_ts") or ""),
+        "categories_generated_sha256": categories_sha,
+        "generated": generated,
+        "review_gate": review_gate,
+    }
+
+
+def approve_autotag_review_gate(
+    *,
+    run_id: str,
+    approved_by: str,
+    allowed_category_drop_ids: list[str] | None,
+) -> dict[str, Any]:
+    rid = str(run_id or "").strip()
+    if not rid:
+        raise ValueError("run_id is required")
+    approved_by_clean = str(approved_by or "").strip()
+    if not approved_by_clean:
+        raise ValueError("approved_by is required")
+
+    selected = _select_autotag_run_root(run_id=rid, limit=500)
+    if selected is None:
+        raise FileNotFoundError(f"autotag run not found: {run_id}")
+
+    generated_sha = ""
+    generated_path = selected / "categories.generated.json"
+    if generated_path.is_file():
+        generated_sha = _file_sha256(generated_path)
+
+    review_existing = _read_json_file(selected / "review-gate.json")
+    review_template = _read_json_file(selected / "review-gate.template.json")
+    review_source: dict[str, Any] = review_existing or review_template
+
+    if not generated_sha:
+        generated_sha = str(review_source.get("categories_generated_sha256") or "")
+    if not generated_sha:
+        metadata = _read_json_file(selected / "run-metadata.json")
+        suggest_raw = metadata.get("suggest")
+        suggest = suggest_raw if isinstance(suggest_raw, dict) else {}
+        generated_sha = str(suggest.get("categories_generated_sha256") or "")
+    if not generated_sha:
+        raise ValueError("missing categories generated sha for run")
+
+    payload = {
+        "run_id": selected.name,
+        "approved": True,
+        "approved_by": approved_by_clean,
+        "approved_at": to_rfc3339(utcnow()),
+        "categories_generated_sha256": generated_sha,
+        "allowed_category_drop_ids": _normalize_review_gate_drop_ids(
+            allowed_category_drop_ids
+        ),
+    }
+    (selected / "review-gate.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "run_id": selected.name,
+        "review_gate": _review_gate_payload_from_source(
+            root=selected,
+            payload=payload,
+            source="review-gate.json",
+        ),
+    }
+
+
+def autotag_decisions(
+    *,
+    run_id: str | None,
+    limit: int = 500,
+    decision_type: str | None = None,
+    state: str | None = None,
+) -> dict[str, Any]:
+    selected = _select_autotag_run_root(run_id=run_id, limit=500)
+
+    if selected is None:
+        return {
+            "run_id": "",
+            "from_ts": "",
+            "to_ts": "",
+            "decision_count": 0,
+            "total_decision_count": 0,
+            "summary": {
+                "by_type": {},
+                "by_state": {},
+                "by_target": {},
+                "avg_confidence": 0.0,
+            },
+            "decisions": [],
+        }
+
+    metadata = _read_json_file(selected / "run-metadata.json")
+    rows = _read_jsonl_file(selected / "autotag-decisions.jsonl")
+    total_decision_count = len(rows)
+
+    type_filter = str(decision_type or "").strip().lower()
+    state_filter = str(state or "").strip().lower()
+    filtered: list[dict[str, Any]] = []
+    by_type: dict[str, int] = {}
+    by_state: dict[str, int] = {}
+    by_target: dict[str, int] = {}
+    conf_total = 0.0
+    conf_count = 0
+
+    for row in rows:
+        row_type = str(row.get("decision_type") or "").strip().lower()
+        row_state = str(row.get("state") or "").strip().lower()
+        if type_filter and row_type != type_filter:
+            continue
+        if state_filter and row_state != state_filter:
+            continue
+
+        target = str(row.get("target_category_id") or "").strip().lower() or "unknown"
+        by_type[row_type or "unknown"] = by_type.get(row_type or "unknown", 0) + 1
+        by_state[row_state or "unknown"] = by_state.get(row_state or "unknown", 0) + 1
+        by_target[target] = by_target.get(target, 0) + 1
+
+        try:
+            conf = float(row.get("confidence") or 0.0)
+            conf_total += conf
+            conf_count += 1
+        except Exception:
+            pass
+
+        reasons_raw = row.get("reasons")
+        reasons: list[Any] = reasons_raw if isinstance(reasons_raw, list) else []
+        risk_flags_raw = row.get("risk_flags")
+        risk_flags: list[Any] = (
+            risk_flags_raw if isinstance(risk_flags_raw, list) else []
+        )
+
+        filtered.append(
+            {
+                "created_at": str(row.get("created_at") or ""),
+                "decision_type": row_type,
+                "entity_id": str(row.get("entity_id") or ""),
+                "entity_type": str(row.get("entity_type") or ""),
+                "entity": str(row.get("entity") or ""),
+                "state": row_state,
+                "target_category_id": target,
+                "confidence": float(row.get("confidence") or 0.0),
+                "reasons": [str(v) for v in reasons[:3]],
+                "risk_flags": [str(v) for v in risk_flags[:5]],
+            }
+        )
+
+    filtered.sort(
+        key=lambda r: (
+            str(r.get("created_at") or ""),
+            str(r.get("entity_id") or ""),
+        ),
+        reverse=True,
+    )
+    bounded = filtered[: max(1, min(5000, int(limit)))]
+
+    return {
+        "run_id": selected.name,
+        "from_ts": str(metadata.get("from_ts") or ""),
+        "to_ts": str(metadata.get("to_ts") or ""),
+        "decision_count": len(filtered),
+        "total_decision_count": total_decision_count,
+        "summary": {
+            "by_type": by_type,
+            "by_state": by_state,
+            "by_target": by_target,
+            "avg_confidence": round((conf_total / conf_count), 4)
+            if conf_count
+            else 0.0,
+        },
+        "decisions": bounded,
     }

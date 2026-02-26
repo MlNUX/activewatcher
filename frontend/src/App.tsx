@@ -2,11 +2,13 @@ import { Fragment, type MouseEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 type RangeKey = "24h" | "1w" | "1m" | "all";
+type DayWindowMode = "rolling" | "midnight";
 type TopicId =
   | "all"
   | "overview"
   | "apps"
   | "categories"
+  | "autotag"
   | "websites"
   | "workspaces"
   | "monitors"
@@ -89,6 +91,82 @@ type ApiEvent = {
 
 type EventsResponse = {
   events: ApiEvent[];
+};
+
+type AutotagRunRow = {
+  run_id: string;
+  created_at: string;
+  from_ts: string;
+  to_ts: string;
+  decision_count: number;
+  categories_generated_sha256: string;
+  pass_a_failed_batches: number;
+  pass_b_failed_batches: number;
+  pass_b_apply_blocked: boolean;
+  pass_b_apply_block_reason: string;
+  recommend_apply: boolean;
+  review_gate_approved?: boolean;
+};
+
+type AutotagRunsResponse = {
+  runs: AutotagRunRow[];
+  latest_run_id: string;
+};
+
+type AutotagDecisionRow = {
+  created_at: string;
+  decision_type: string;
+  entity_id: string;
+  entity_type: string;
+  entity: string;
+  state: string;
+  target_category_id: string;
+  confidence: number;
+  reasons: string[];
+  risk_flags: string[];
+};
+
+type AutotagDecisionsResponse = {
+  run_id: string;
+  from_ts: string;
+  to_ts: string;
+  decision_count: number;
+  total_decision_count: number;
+  summary: {
+    by_type: Record<string, number>;
+    by_state: Record<string, number>;
+    by_target: Record<string, number>;
+    avg_confidence: number;
+  };
+  decisions: AutotagDecisionRow[];
+};
+
+type GeneratedCategoriesPayload = Record<string, unknown> & {
+  categories?: Array<Record<string, unknown>>;
+};
+
+type AutotagReviewGate = {
+  source: string;
+  run_id: string;
+  approved: boolean;
+  approved_by: string;
+  approved_at: string;
+  categories_generated_sha256: string;
+  allowed_category_drop_ids: string[];
+};
+
+type AutotagGeneratedResponse = {
+  run_id: string;
+  from_ts: string;
+  to_ts: string;
+  categories_generated_sha256: string;
+  generated: GeneratedCategoriesPayload;
+  review_gate: AutotagReviewGate;
+};
+
+type AutotagApproveResponse = {
+  run_id: string;
+  review_gate: AutotagReviewGate;
 };
 
 type TimeWindow = { from: string; to: string };
@@ -176,6 +254,20 @@ type MonitorEnabledPeriodRow = {
   signature: string;
 };
 
+type LoadKey =
+  | "summary"
+  | "categories"
+  | "autotag"
+  | "window"
+  | "workspace"
+  | "workspace_switch"
+  | "system"
+  | "browser_tabs"
+  | "window_visible";
+
+const DEFAULT_REFRESH_MS = 30_000;
+const ALL_RANGE_REFRESH_MS = 120_000;
+
 const RANGES: Array<{ key: RangeKey; label: string }> = [
   { key: "24h", label: "24h" },
   { key: "1w", label: "1w" },
@@ -183,11 +275,17 @@ const RANGES: Array<{ key: RangeKey; label: string }> = [
   { key: "all", label: "all" }
 ];
 
+const DAY_WINDOW_MODES: Array<{ key: DayWindowMode; label: string }> = [
+  { key: "rolling", label: "-24h -> jetzt" },
+  { key: "midnight", label: "00:00 -> jetzt" }
+];
+
 const TOPICS: Array<{ id: TopicId; label: string }> = [
   { id: "all", label: "all" },
   { id: "overview", label: "overview" },
   { id: "apps", label: "apps" },
   { id: "categories", label: "categories" },
+  { id: "autotag", label: "autotag" },
   { id: "websites", label: "websites" },
   { id: "workspaces", label: "workspaces" },
   { id: "monitors", label: "monitors" },
@@ -202,10 +300,48 @@ const MONITOR_SETUP_FILTERS: Array<{ key: MonitorSetupFilter; label: string }> =
   { key: "multi", label: "multi monitor" }
 ];
 
+function requestedLoadKeys(page: "dashboard" | "stats", topic: TopicId): Set<LoadKey> {
+  if (page === "dashboard") {
+    return new Set<LoadKey>(["summary", "categories"]);
+  }
+
+  if (topic === "all") {
+    return new Set<LoadKey>([
+      "summary",
+      "categories",
+      "autotag",
+      "window",
+      "workspace",
+      "workspace_switch",
+      "system",
+      "browser_tabs",
+      "window_visible"
+    ]);
+  }
+
+  if (topic === "overview" || topic === "apps") return new Set<LoadKey>(["summary"]);
+  if (topic === "categories") return new Set<LoadKey>(["categories"]);
+  if (topic === "autotag") return new Set<LoadKey>(["autotag"]);
+  if (topic === "websites") return new Set<LoadKey>(["window"]);
+  if (topic === "workspaces") return new Set<LoadKey>(["workspace", "workspace_switch"]);
+  if (topic === "monitors") return new Set<LoadKey>(["workspace"]);
+  if (topic === "system") return new Set<LoadKey>(["system"]);
+  if (topic === "tabs") return new Set<LoadKey>(["browser_tabs"]);
+  if (topic === "logs") return new Set<LoadKey>(["window_visible"]);
+
+  return new Set<LoadKey>();
+}
+
 function parseRangeKey(v: string | null | undefined): RangeKey {
   const s = String(v || "");
   if (s === "24h" || s === "1w" || s === "1m" || s === "all") return s;
   return "24h";
+}
+
+function parseDayWindowMode(v: string | null | undefined): DayWindowMode {
+  const s = String(v || "").toLowerCase();
+  if (s === "midnight") return "midnight";
+  return "rolling";
 }
 
 function parseTopicId(v: string | null | undefined): TopicId {
@@ -215,6 +351,7 @@ function parseTopicId(v: string | null | undefined): TopicId {
     s === "overview" ||
     s === "apps" ||
     s === "categories" ||
+    s === "autotag" ||
     s === "websites" ||
     s === "workspaces" ||
     s === "monitors" ||
@@ -575,6 +712,19 @@ function qs(window: TimeWindow): string {
   return p.toString();
 }
 
+function parseIdList(raw: string): string[] {
+  const parts = String(raw || "").split(/[\n,]/g);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const part of parts) {
+    const value = String(part || "").trim().toLowerCase();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -584,9 +734,24 @@ function addMs(iso: string, deltaMs: number): string {
   return new Date(d.getTime() + deltaMs).toISOString();
 }
 
-async function resolveWindow(range: RangeKey): Promise<TimeWindow> {
+async function resolveWindow(
+  range: RangeKey,
+  dayWindowMode: DayWindowMode,
+  page: "dashboard" | "stats"
+): Promise<TimeWindow> {
   const to = nowIso();
-  if (range === "24h") return { from: addMs(to, -24 * 3600 * 1000), to };
+  if (range === "24h") {
+    if (dayWindowMode === "midnight") {
+      const now = new Date();
+      const fromLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      if (page === "stats") {
+        return { from: fromLocal.toISOString(), to };
+      }
+      const toLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      return { from: fromLocal.toISOString(), to: toLocal.toISOString() };
+    }
+    return { from: addMs(to, -24 * 3600 * 1000), to };
+  }
   if (range === "1w") return { from: addMs(to, -7 * 24 * 3600 * 1000), to };
   if (range === "1m") return { from: addMs(to, -30 * 24 * 3600 * 1000), to };
 
@@ -731,6 +896,29 @@ function tooltipPoint(e: MouseEvent<Element>): { x: number; y: number } {
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
+  return (await res.json()) as T;
+}
+
+async function postJson<T>(url: string, payload: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      detail = asString(body?.detail);
+    } catch {
+      detail = "";
+    }
+    if (detail) throw new Error(`${url} -> HTTP ${res.status}: ${detail}`);
+    throw new Error(`${url} -> HTTP ${res.status}`);
+  }
   return (await res.json()) as T;
 }
 
@@ -1332,12 +1520,14 @@ function LegacyTimeline({
   chunks,
   range,
   fromTs,
-  toTs
+  toTs,
+  showNowMarker
 }: {
   chunks: TimelineChunk[];
   range: RangeKey;
   fromTs: string;
   toTs: string;
+  showNowMarker: boolean;
 }) {
   const [hovered, setHovered] = useState<HoverTooltip | null>(null);
 
@@ -1400,6 +1590,38 @@ function LegacyTimeline({
     };
   });
 
+  let timelineEntries = entries;
+  if (range === "24h" && entries.length > 0 && entries.length < 24) {
+    const fromMs = Date.parse(fromTs);
+    const fromDt = new Date(fromTs);
+    const startsAtMidnightLocal =
+      !Number.isNaN(fromMs) &&
+      !Number.isNaN(fromDt.getTime()) &&
+      fromDt.getHours() === 0 &&
+      fromDt.getMinutes() === 0 &&
+      fromDt.getSeconds() === 0;
+    const isHourlyChunk = inferredChunkSeconds >= 3300 && inferredChunkSeconds <= 3900;
+    if (startsAtMidnightLocal && isHourlyChunk) {
+      const padded = [...entries];
+      for (let i = entries.length; i < 24; i++) {
+        const startMs = fromMs + i * 3600_000;
+        const endMs = startMs + 3600_000;
+        padded.push({
+          idx: i,
+          start_ts: new Date(startMs).toISOString(),
+          end_ts: new Date(endMs).toISOString(),
+          active: 0,
+          afk: 0,
+          off: 0,
+          activePct: 0,
+          afkPct: 0,
+          top_app: null
+        });
+      }
+      timelineEntries = padded;
+    }
+  }
+
   const avgActivePct =
     entries.length > 0 ? entries.reduce((sum, e) => sum + e.activePct, 0) / entries.length : 0;
   const peak = entries.reduce((best, e) => (best == null || e.activePct > best.activePct ? e : best), null as
@@ -1425,7 +1647,10 @@ function LegacyTimeline({
   const maxHours = Math.max(0, inferredChunkSeconds / 3600);
   const midHours = maxHours / 2;
   let infoBase = "";
-  if (range === "24h") infoBase = "per hour";
+  if (range === "24h") {
+    const chunk = Math.max(1, Math.round(inferredChunkSeconds));
+    infoBase = chunk >= 3600 ? `per ${Math.round(chunk / 3600)}h` : "per hour";
+  }
   else if (range === "1w" || range === "1m") infoBase = "per day";
   else {
     const chunk = Math.max(1, Math.round(inferredChunkSeconds));
@@ -1434,7 +1659,17 @@ function LegacyTimeline({
     else infoBase = `per ${Math.max(1, Math.round(chunk / 60))}m`;
   }
 
-  const peakLeftPct = peak && entries.length > 0 ? ((peak.idx + 0.5) / entries.length) * 100 : 0;
+  const peakLeftPct = peak && timelineEntries.length > 0 ? ((peak.idx + 0.5) / timelineEntries.length) * 100 : 0;
+  let nowLeftPct: number | null = null;
+  if (showNowMarker) {
+    const fromMs = Date.parse(fromTs);
+    const toMs = Date.parse(toTs);
+    const nowMs = Date.now();
+    if (!Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs > fromMs) {
+      const ratio = (nowMs - fromMs) / (toMs - fromMs);
+      nowLeftPct = Math.max(0, Math.min(100, ratio * 100));
+    }
+  }
 
   return (
     <div>
@@ -1452,6 +1687,12 @@ function LegacyTimeline({
             <span className="legendDotLegacy" style={{ background: "rgba(255,255,255,.18)" }} />
             Off
           </span>
+          {showNowMarker ? (
+            <span className="legendItemLegacy">
+              <span className="legendDotLegacy" style={{ background: "rgba(34,197,94,.92)" }} />
+              Jetzt
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="sub timelineInfoLegacy">
@@ -1476,8 +1717,9 @@ function LegacyTimeline({
           {peak && peak.activePct > 0 ? (
             <div className="timelinePeakLegacy" style={{ left: `${peakLeftPct}%` }} />
           ) : null}
+          {nowLeftPct != null ? <div className="timelineNowLegacy" style={{ left: `${nowLeftPct}%` }} /> : null}
           <div className="timelineLegacy">
-            {entries.map((e) => (
+            {timelineEntries.map((e) => (
               <div
                 key={`${e.start_ts}-${e.idx}`}
                 className="barColLegacy"
@@ -1493,8 +1735,8 @@ function LegacyTimeline({
         </div>
       </div>
       <div className="timelineLabelsLegacy timelinePadLegacy" aria-label="timeline labels">
-        {entries.map((e, i) => (
-          <span key={`${e.start_ts}-lbl`}>{showLabel(i, entries.length) ? labelText(e.start_ts) : ""}</span>
+        {timelineEntries.map((e, i) => (
+          <span key={`${e.start_ts}-lbl`}>{showLabel(i, timelineEntries.length) ? labelText(e.start_ts) : ""}</span>
         ))}
       </div>
       <div className="timelineScaleLegacy timelinePadLegacy">
@@ -1514,17 +1756,22 @@ export default function App() {
   const uiBase = `${uiPrefix}/ui`;
   const initialRange = parseRangeKey(searchParams.get("range"));
   const initialTopic = parseTopicId(searchParams.get("topic"));
+  const initialDayWindowMode =
+    page === "dashboard" ? "midnight" : parseDayWindowMode(searchParams.get("day_window"));
 
   const [range, setRange] = useState<RangeKey>(initialRange);
   const [topic, setTopic] = useState<TopicId>(initialTopic);
+  const [dayWindowMode, setDayWindowMode] = useState<DayWindowMode>(initialDayWindowMode);
   const [monitorSetupFilter, setMonitorSetupFilter] = useState<MonitorSetupFilter>("all");
   const [reloadKey, setReloadKey] = useState(0);
 
-  function replaceQuery(nextRange: RangeKey, nextTopic: TopicId): void {
+  function replaceQuery(nextRange: RangeKey, nextTopic: TopicId, nextDayWindowMode: DayWindowMode): void {
     const params = new URLSearchParams(String(window.location.search || ""));
     params.set("range", nextRange);
     if (page === "stats") params.set("topic", nextTopic);
     else params.delete("topic");
+    if (nextRange === "24h" && nextDayWindowMode === "midnight") params.set("day_window", "midnight");
+    else params.delete("day_window");
     const query = params.toString();
     const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}`;
     window.history.replaceState(null, "", nextUrl);
@@ -1532,18 +1779,24 @@ export default function App() {
 
   function onRangeChange(next: RangeKey): void {
     setRange(next);
-    replaceQuery(next, topic);
+    replaceQuery(next, topic, dayWindowMode);
   }
 
   function onTopicChange(next: TopicId): void {
     setTopic(next);
-    replaceQuery(range, next);
+    replaceQuery(range, next, dayWindowMode);
+  }
+
+  function onDayWindowModeChange(next: DayWindowMode): void {
+    setDayWindowMode(next);
+    replaceQuery(range, topic, next);
   }
 
   function hrefFor(target: "dashboard" | "stats"): string {
     const params = new URLSearchParams();
     params.set("range", range);
     if (target === "stats") params.set("topic", topic);
+    if (range === "24h" && dayWindowMode === "midnight") params.set("day_window", "midnight");
     const qs = params.toString();
     return target === "dashboard"
       ? `${uiBase}/${qs ? `?${qs}` : ""}`
@@ -1553,13 +1806,20 @@ export default function App() {
   const [windowRange, setWindowRange] = useState<TimeWindow | null>(null);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [categories, setCategories] = useState<CategoriesResponse | null>(null);
+  const [autotagRuns, setAutotagRuns] = useState<AutotagRunRow[]>([]);
+  const [autotagDecisions, setAutotagDecisions] = useState<AutotagDecisionsResponse | null>(null);
+  const [autotagGenerated, setAutotagGenerated] = useState<AutotagGeneratedResponse | null>(null);
+  const [autotagRunId, setAutotagRunId] = useState("");
+  const [autotagApprovedBy, setAutotagApprovedBy] = useState("");
+  const [autotagAllowedDropIds, setAutotagAllowedDropIds] = useState("");
+  const [autotagApprovePending, setAutotagApprovePending] = useState(false);
+  const [autotagApproveError, setAutotagApproveError] = useState("");
+  const [autotagApproveNote, setAutotagApproveNote] = useState("");
   const [windowEvents, setWindowEvents] = useState<ApiEvent[]>([]);
   const [workspaceEvents, setWorkspaceEvents] = useState<ApiEvent[]>([]);
   const [workspaceSwitchEvents, setWorkspaceSwitchEvents] = useState<ApiEvent[]>([]);
   const [systemEvents, setSystemEvents] = useState<ApiEvent[]>([]);
   const [tabsEvents, setTabsEvents] = useState<ApiEvent[]>([]);
-  const [appOpenEvents, setAppOpenEvents] = useState<ApiEvent[]>([]);
-  const [idleEvents, setIdleEvents] = useState<ApiEvent[]>([]);
   const [visibleEvents, setVisibleEvents] = useState<ApiEvent[]>([]);
 
   const [loading, setLoading] = useState(false);
@@ -1578,96 +1838,214 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     let timer: number | null = null;
+    let activeLoadId = 0;
+    let loadInFlight = false;
+
+    const refreshMs = range === "all" ? ALL_RANGE_REFRESH_MS : DEFAULT_REFRESH_MS;
+    const requested = requestedLoadKeys(page, topic);
 
     async function load() {
+      if (loadInFlight) return;
+      loadInFlight = true;
+      const loadId = activeLoadId + 1;
+      activeLoadId = loadId;
+
       if (!cancelled) setLoading(true);
       const errors: string[] = [];
 
-      const timeWindow = await resolveWindow(range);
-      if (cancelled) return;
-      setWindowRange(timeWindow);
+      try {
+        const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
+        const timeWindow = await resolveWindow(range, effectiveDayWindowMode, page);
+        if (cancelled || loadId !== activeLoadId) return;
+        setWindowRange(timeWindow);
 
-      const query = qs(timeWindow);
-      const fromMs = Date.parse(timeWindow.from);
-      const toMs = Date.parse(timeWindow.to);
-      const durationSeconds =
-        !Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs > fromMs ? (toMs - fromMs) / 1000 : 0;
-      const chunkSeconds = chunkSecondsForRange(range, durationSeconds);
-      const summaryQuery = `${query}&chunk_seconds=${chunkSeconds}`;
+        const query = qs(timeWindow);
+        const fromMs = Date.parse(timeWindow.from);
+        const toMs = Date.parse(timeWindow.to);
+        const durationSeconds =
+          !Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs > fromMs ? (toMs - fromMs) / 1000 : 0;
+        const chunkSeconds =
+          page === "dashboard" && range === "24h" && effectiveDayWindowMode === "midnight"
+            ? 3600
+            : chunkSecondsForRange(range, durationSeconds);
+        const summaryQuery = `${query}&chunk_seconds=${chunkSeconds}`;
 
-      async function safe<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
-        try {
-          return await fn();
-        } catch (e) {
-          errors.push(`${label}: ${String(e)}`);
-          return fallback;
+        const pending: Array<Promise<void>> = [];
+
+        function queue<T>(
+          label: string,
+          url: string,
+          apply: (value: T) => void,
+          applyErrorFallback: () => void
+        ): void {
+          const p = fetchJson<T>(url)
+            .then((value) => {
+              if (cancelled || loadId !== activeLoadId) return;
+              apply(value);
+            })
+            .catch((e) => {
+              errors.push(`${label}: ${String(e)}`);
+              if (cancelled || loadId !== activeLoadId) return;
+              applyErrorFallback();
+            });
+          pending.push(p);
         }
+
+        if (requested.has("summary")) {
+          queue<SummaryResponse>("summary", `/v1/summary?${summaryQuery}`, (value) => setSummary(value), () => setSummary(null));
+        }
+        if (requested.has("categories")) {
+          queue<CategoriesResponse>(
+            "categories",
+            `/v1/categories?mode=auto&${query}`,
+            (value) => setCategories(value),
+            () => setCategories(null)
+          );
+        }
+        if (requested.has("autotag")) {
+          const p = fetchJson<AutotagRunsResponse>("/v1/autotag/runs?limit=100")
+            .then(async (runsValue) => {
+              if (cancelled || loadId !== activeLoadId) return;
+              const runs = Array.isArray(runsValue?.runs) ? runsValue.runs : [];
+              setAutotagRuns(runs);
+
+              const selectedRunId = runs.some((row) => row.run_id === autotagRunId)
+                ? autotagRunId
+                : String(runsValue?.latest_run_id || runs[0]?.run_id || "");
+
+              if (selectedRunId !== autotagRunId) {
+                setAutotagRunId(selectedRunId);
+              }
+
+              if (!selectedRunId) {
+                setAutotagDecisions(null);
+                setAutotagGenerated(null);
+                return;
+              }
+
+              const decisionsUrl = `/v1/autotag/decisions?run_id=${encodeURIComponent(selectedRunId)}&limit=600`;
+              try {
+                const decisionsValue = await fetchJson<AutotagDecisionsResponse>(decisionsUrl);
+                if (cancelled || loadId !== activeLoadId) return;
+                setAutotagDecisions(decisionsValue);
+              } catch (e) {
+                errors.push(`autotag decisions: ${String(e)}`);
+                if (cancelled || loadId !== activeLoadId) return;
+                setAutotagDecisions(null);
+              }
+
+              const generatedUrl = `/v1/autotag/generated?run_id=${encodeURIComponent(selectedRunId)}`;
+              try {
+                const generatedValue = await fetchJson<AutotagGeneratedResponse>(generatedUrl);
+                if (cancelled || loadId !== activeLoadId) return;
+                setAutotagGenerated(generatedValue);
+              } catch (e) {
+                errors.push(`autotag generated: ${String(e)}`);
+                if (cancelled || loadId !== activeLoadId) return;
+                setAutotagGenerated(null);
+              }
+            })
+            .catch((e) => {
+              errors.push(`autotag runs: ${String(e)}`);
+              if (cancelled || loadId !== activeLoadId) return;
+              setAutotagRuns([]);
+              setAutotagDecisions(null);
+              setAutotagGenerated(null);
+            });
+          pending.push(p);
+        }
+        if (requested.has("window")) {
+          queue<EventsResponse>(
+            "window",
+            `/v1/events?bucket=window&${query}`,
+            (value) => setWindowEvents(Array.isArray(value.events) ? value.events : []),
+            () => setWindowEvents([])
+          );
+        }
+        if (requested.has("workspace")) {
+          queue<EventsResponse>(
+            "workspace",
+            `/v1/events?bucket=workspace&${query}`,
+            (value) => setWorkspaceEvents(Array.isArray(value.events) ? value.events : []),
+            () => setWorkspaceEvents([])
+          );
+        }
+        if (requested.has("workspace_switch")) {
+          queue<EventsResponse>(
+            "workspace_switch",
+            `/v1/events?bucket=workspace_switch&${query}`,
+            (value) => setWorkspaceSwitchEvents(Array.isArray(value.events) ? value.events : []),
+            () => setWorkspaceSwitchEvents([])
+          );
+        }
+        if (requested.has("system")) {
+          queue<EventsResponse>(
+            "system",
+            `/v1/events?bucket=system&${query}`,
+            (value) => setSystemEvents(Array.isArray(value.events) ? value.events : []),
+            () => setSystemEvents([])
+          );
+        }
+        if (requested.has("browser_tabs")) {
+          queue<EventsResponse>(
+            "browser_tabs",
+            `/v1/events?bucket=browser_tabs&${query}`,
+            (value) => setTabsEvents(Array.isArray(value.events) ? value.events : []),
+            () => setTabsEvents([])
+          );
+        }
+        if (requested.has("window_visible")) {
+          queue<EventsResponse>(
+            "window_visible",
+            `/v1/events?bucket=window_visible&${query}`,
+            (value) => setVisibleEvents(Array.isArray(value.events) ? value.events : []),
+            () => setVisibleEvents([])
+          );
+        }
+
+        await Promise.all(pending);
+        if (cancelled || loadId !== activeLoadId) return;
+
+        setError(errors.join(" | "));
+        setUpdatedAt(new Date().toLocaleTimeString());
+      } catch (e) {
+        if (cancelled || loadId !== activeLoadId) return;
+        setError(String(e));
+      } finally {
+        if (!cancelled && loadId === activeLoadId) {
+          setLoading(false);
+        }
+        loadInFlight = false;
       }
-
-      const [
-        summaryData,
-        categoriesData,
-        windowData,
-        workspaceData,
-        workspaceSwitchData,
-        systemData,
-        tabsData,
-        appOpenData,
-        idleData,
-        visibleData
-      ] = await Promise.all([
-        safe(
-          "summary",
-          () => fetchJson<SummaryResponse>(`/v1/summary?${summaryQuery}`),
-          null as SummaryResponse | null
-        ),
-        safe(
-          "categories",
-          () => fetchJson<CategoriesResponse>(`/v1/categories?mode=auto&${query}`),
-          null as CategoriesResponse | null
-        ),
-        safe("window", () => fetchJson<EventsResponse>(`/v1/events?bucket=window&${query}`), { events: [] }),
-        safe("workspace", () => fetchJson<EventsResponse>(`/v1/events?bucket=workspace&${query}`), { events: [] }),
-        safe(
-          "workspace_switch",
-          () => fetchJson<EventsResponse>(`/v1/events?bucket=workspace_switch&${query}`),
-          { events: [] }
-        ),
-        safe("system", () => fetchJson<EventsResponse>(`/v1/events?bucket=system&${query}`), { events: [] }),
-        safe("browser_tabs", () => fetchJson<EventsResponse>(`/v1/events?bucket=browser_tabs&${query}`), { events: [] }),
-        safe("app_open", () => fetchJson<EventsResponse>(`/v1/events?bucket=app_open&${query}`), { events: [] }),
-        safe("idle", () => fetchJson<EventsResponse>(`/v1/events?bucket=idle&${query}`), { events: [] }),
-        safe("window_visible", () => fetchJson<EventsResponse>(`/v1/events?bucket=window_visible&${query}`), {
-          events: []
-        })
-      ]);
-
-      if (cancelled) return;
-
-      setSummary(summaryData);
-      setCategories(categoriesData);
-      setWindowEvents(Array.isArray(windowData.events) ? windowData.events : []);
-      setWorkspaceEvents(Array.isArray(workspaceData.events) ? workspaceData.events : []);
-      setWorkspaceSwitchEvents(Array.isArray(workspaceSwitchData.events) ? workspaceSwitchData.events : []);
-      setSystemEvents(Array.isArray(systemData.events) ? systemData.events : []);
-      setTabsEvents(Array.isArray(tabsData.events) ? tabsData.events : []);
-      setAppOpenEvents(Array.isArray(appOpenData.events) ? appOpenData.events : []);
-      setIdleEvents(Array.isArray(idleData.events) ? idleData.events : []);
-      setVisibleEvents(Array.isArray(visibleData.events) ? visibleData.events : []);
-
-      setError(errors.join(" | "));
-      setUpdatedAt(new Date().toLocaleTimeString());
-      setLoading(false);
     }
 
     void load();
-    timer = window.setInterval(() => void load(), 30_000);
+    timer = window.setInterval(() => void load(), refreshMs);
 
     return () => {
       cancelled = true;
       if (timer != null) window.clearInterval(timer);
     };
-  }, [range, reloadKey]);
+  }, [page, topic, range, dayWindowMode, reloadKey, autotagRunId]);
+
+  useEffect(() => {
+    const runId = String(autotagGenerated?.run_id || "");
+    if (!runId) {
+      setAutotagApprovedBy("");
+      setAutotagAllowedDropIds("");
+      setAutotagApproveError("");
+      setAutotagApproveNote("");
+      return;
+    }
+    const gate = autotagGenerated?.review_gate;
+    const allowedDropIds = Array.isArray(gate?.allowed_category_drop_ids)
+      ? gate.allowed_category_drop_ids
+      : [];
+    setAutotagApprovedBy(String(gate?.approved_by || ""));
+    setAutotagAllowedDropIds(allowedDropIds.join(", "));
+    setAutotagApproveError("");
+    setAutotagApproveNote("");
+  }, [autotagGenerated?.run_id]);
 
   const topApps = useMemo(() => {
     if (!summary) return [] as SummaryApp[];
@@ -2601,6 +2979,115 @@ export default function App() {
     return rows.slice(0, 40);
   }, [visibleEvents]);
 
+  const autotagCurrentRun = useMemo(() => {
+    if (!autotagRuns.length) return null;
+    return autotagRuns.find((row) => row.run_id === autotagRunId) || autotagRuns[0] || null;
+  }, [autotagRuns, autotagRunId]);
+
+  const autotagStateRows = useMemo<BarRow[]>(() => {
+    const byState = autotagDecisions?.summary?.by_state || {};
+    return Object.entries(byState)
+      .map(([key, value]) => ({
+        id: key,
+        label: key || "unknown",
+        value: Number(value) || 0,
+        sub: "decisions"
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 12);
+  }, [autotagDecisions]);
+
+  const autotagTypeRows = useMemo<BarRow[]>(() => {
+    const byType = autotagDecisions?.summary?.by_type || {};
+    return Object.entries(byType)
+      .map(([key, value]) => ({
+        id: key,
+        label: key || "unknown",
+        value: Number(value) || 0,
+        sub: "decisions"
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 12);
+  }, [autotagDecisions]);
+
+  const autotagTopTargets = useMemo(() => {
+    const byTarget = autotagDecisions?.summary?.by_target || {};
+    return Object.entries(byTarget)
+      .map(([key, value]) => ({ id: key, label: key, value: Number(value) || 0 }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+  }, [autotagDecisions]);
+
+  const autotagGeneratedJson = useMemo(() => {
+    if (!autotagGenerated) return "";
+    try {
+      return JSON.stringify(autotagGenerated.generated || {}, null, 2);
+    } catch {
+      return "";
+    }
+  }, [autotagGenerated]);
+
+  const autotagGeneratedCategoryCount = useMemo(() => {
+    const categories = autotagGenerated?.generated?.categories;
+    return Array.isArray(categories) ? categories.length : 0;
+  }, [autotagGenerated]);
+
+  const autotagReviewGate = autotagGenerated?.review_gate || null;
+
+  const autotagReviewSummary = useMemo(() => {
+    if (!autotagReviewGate) return "review gate: missing";
+    if (autotagReviewGate.approved) {
+      const by = String(autotagReviewGate.approved_by || "").trim() || "unknown";
+      const at = String(autotagReviewGate.approved_at || "").trim();
+      return at ? `review gate: approved by ${by} at ${fmtTs(at)}` : `review gate: approved by ${by}`;
+    }
+    return "review gate: pending approval";
+  }, [autotagReviewGate]);
+
+  async function approveAutotagRunFromUi(): Promise<void> {
+    const runId = String(autotagCurrentRun?.run_id || "");
+    if (!runId) {
+      setAutotagApproveError("No run selected.");
+      setAutotagApproveNote("");
+      return;
+    }
+    const approvedBy = String(autotagApprovedBy || "").trim();
+    if (!approvedBy) {
+      setAutotagApproveError("Please fill \"approved by\".");
+      setAutotagApproveNote("");
+      return;
+    }
+
+    setAutotagApprovePending(true);
+    setAutotagApproveError("");
+    setAutotagApproveNote("");
+    try {
+      const allowedCategoryDropIds = parseIdList(autotagAllowedDropIds);
+      const value = await postJson<AutotagApproveResponse>("/v1/autotag/review-gate/approve", {
+        run_id: runId,
+        approved_by: approvedBy,
+        allowed_category_drop_ids: allowedCategoryDropIds
+      });
+      const approvedAt = String(value?.review_gate?.approved_at || "");
+      setAutotagApproveNote(
+        approvedAt ? `Run approved: ${fmtTs(approvedAt)}.` : "Run approved."
+      );
+
+      const generatedUrl = `/v1/autotag/generated?run_id=${encodeURIComponent(runId)}`;
+      const generatedValue = await fetchJson<AutotagGeneratedResponse>(generatedUrl);
+      setAutotagGenerated(generatedValue);
+      setAutotagAllowedDropIds(
+        Array.isArray(generatedValue.review_gate?.allowed_category_drop_ids)
+          ? generatedValue.review_gate.allowed_category_drop_ids.join(", ")
+          : ""
+      );
+    } catch (e) {
+      setAutotagApproveError(String(e));
+    } finally {
+      setAutotagApprovePending(false);
+    }
+  }
+
   const showTopic = (id: TopicId): boolean => {
     if (page === "dashboard") {
       return id === "overview" || id === "apps" || id === "categories";
@@ -2721,6 +3208,16 @@ export default function App() {
 
   const statusTone = error ? "isError" : loading ? "isLoading" : "isOk";
   const statusBadge = loading ? "syncing" : error ? "degraded" : "healthy";
+  const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
+  const showTodayNowMarker = page === "dashboard" && range === "24h" && effectiveDayWindowMode === "midnight";
+  const rangeLabel =
+    range === "24h"
+      ? effectiveDayWindowMode === "midnight"
+        ? page === "dashboard"
+          ? "24h (00:00 -> 00:00)"
+          : "24h (00:00 -> jetzt)"
+        : "24h (-24h -> jetzt)"
+      : range;
 
   return (
     <main className={`page page-${page}`}>
@@ -2738,19 +3235,35 @@ export default function App() {
             </div>
           </div>
           <div className="sub">
-            {windowRange ? `range: ${range} · ${fmtTs(windowRange.from)} → ${fmtTs(windowRange.to)}` : `range: ${range}`}
+            {windowRange ? `range: ${rangeLabel} · ${fmtTs(windowRange.from)} → ${fmtTs(windowRange.to)}` : `range: ${rangeLabel}`}
           </div>
         </div>
 
-        <div className="controls">
-          {RANGES.map((r) => (
-            <button key={r.key} className={r.key === range ? "pill active" : "pill"} onClick={() => onRangeChange(r.key)}>
-              {r.label}
+        <div>
+          <div className="controls">
+            {RANGES.map((r) => (
+              <button key={r.key} className={r.key === range ? "pill active" : "pill"} onClick={() => onRangeChange(r.key)}>
+                {page === "dashboard" && r.key === "24h" ? "heute" : r.label}
+              </button>
+            ))}
+            <button className="pill" onClick={() => setReloadKey((v) => v + 1)}>
+              refresh
             </button>
-          ))}
-          <button className="pill" onClick={() => setReloadKey((v) => v + 1)}>
-            refresh
-          </button>
+          </div>
+          {page === "stats" && range === "24h" ? (
+            <div className="controls" style={{ marginTop: 7 }}>
+              {DAY_WINDOW_MODES.map((mode) => (
+                <button
+                  key={mode.key}
+                  type="button"
+                  className={dayWindowMode === mode.key ? "pill active" : "pill"}
+                  onClick={() => onDayWindowModeChange(mode.key)}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -2773,7 +3286,7 @@ export default function App() {
           <span className="statusBadge">{statusBadge}</span>
           <span>{updatedAt ? `updated ${updatedAt}` : loading ? "fetching data..." : "waiting for first refresh"}</span>
           <span className={error ? "statusIssue" : "statusHealthy"}>
-            {error ? `partial errors: ${error}` : "all data sources reachable"}
+            {error ? `partial errors: ${error}` : "all requested data sources reachable"}
           </span>
         </div>
       </section>
@@ -2815,6 +3328,7 @@ export default function App() {
                   range={range}
                   fromTs={summary?.from_ts || windowRange?.from || ""}
                   toTs={summary?.to_ts || windowRange?.to || ""}
+                  showNowMarker={showTodayNowMarker}
                 />
               </div>
             </div>
@@ -2833,6 +3347,220 @@ export default function App() {
           {showTopic("categories") ? categoriesCard : null}
         </>
       )}
+
+      {page === "stats" && showTopic("autotag") ? (
+        <section className="card">
+          <div className="cardHd">
+            <h2>Autotag Decisions</h2>
+          </div>
+          <div className="cardBd workspaceStack">
+            <div className="wsFilterRow">
+              <span className="wsFilterLabel">run</span>
+              <div className="autotagRunControl">
+                <select
+                  className="autotagSelect"
+                  value={autotagCurrentRun?.run_id || ""}
+                  onChange={(e) => setAutotagRunId(e.target.value)}
+                  disabled={!autotagRuns.length}
+                >
+                  {!autotagRuns.length ? <option value="">no runs</option> : null}
+                  {autotagRuns.map((row) => (
+                    <option key={row.run_id} value={row.run_id}>
+                      {row.run_id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {autotagCurrentRun ? (
+                <span className={`autotagApplyBadge ${autotagCurrentRun.recommend_apply ? "ok" : "warn"}`}>
+                  {autotagCurrentRun.recommend_apply ? "recommend apply" : "review needed"}
+                </span>
+              ) : null}
+              {autotagReviewGate ? (
+                <span className={`autotagApplyBadge ${autotagReviewGate.approved ? "ok" : "warn"}`}>
+                  {autotagReviewGate.approved ? "review approved" : "review pending"}
+                </span>
+              ) : null}
+              <span className="sub wsFilterMeta">
+                rows: {autotagDecisions?.decision_count || 0}
+                {autotagDecisions ? `/${autotagDecisions.total_decision_count}` : ""}
+              </span>
+            </div>
+
+            {autotagCurrentRun ? (
+              <div className="sub">
+                {fmtTs(autotagCurrentRun.from_ts)} {"->"} {fmtTs(autotagCurrentRun.to_ts)} · pass-a failed batches: {autotagCurrentRun.pass_a_failed_batches}
+                {" · "}
+                pass-b failed batches: {autotagCurrentRun.pass_b_failed_batches}
+                {autotagCurrentRun.pass_b_apply_blocked
+                  ? ` · apply blocked: ${autotagCurrentRun.pass_b_apply_block_reason || "yes"}`
+                  : " · apply blocked: no"}
+              </div>
+            ) : (
+              <div className="empty">No autotag runs found.</div>
+            )}
+
+            {autotagCurrentRun ? (
+              <div className="autotagApprovePanel">
+                <div className="autotagApproveGrid">
+                  <label className="autotagApproveField">
+                    <span>approved by</span>
+                    <input
+                      type="text"
+                      value={autotagApprovedBy}
+                      placeholder="your name"
+                      onChange={(e) => setAutotagApprovedBy(e.target.value)}
+                      disabled={autotagApprovePending}
+                    />
+                  </label>
+                  <label className="autotagApproveField autotagApproveFieldWide">
+                    <span>allowed drop ids</span>
+                    <input
+                      type="text"
+                      value={autotagAllowedDropIds}
+                      placeholder="optional, comma-separated"
+                      onChange={(e) => setAutotagAllowedDropIds(e.target.value)}
+                      disabled={autotagApprovePending}
+                    />
+                  </label>
+                </div>
+                <div className="autotagApproveActions">
+                  <button
+                    type="button"
+                    className="pill"
+                    onClick={() => void approveAutotagRunFromUi()}
+                    disabled={autotagApprovePending || !autotagCurrentRun}
+                  >
+                    {autotagApprovePending ? "saving..." : "approve in ui"}
+                  </button>
+                  <span className="sub">{autotagReviewSummary}</span>
+                </div>
+                {autotagApproveNote ? (
+                  <div className="sub autotagApproveMessage ok">{autotagApproveNote}</div>
+                ) : null}
+                {autotagApproveError ? (
+                  <div className="sub autotagApproveMessage err">{autotagApproveError}</div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="split2">
+              <div>
+                <h3>Decision States</h3>
+                {autotagStateRows.length ? (
+                  <HorizontalBars rows={autotagStateRows} valueFormatter={(v) => String(Math.round(v))} />
+                ) : (
+                  <div className="empty">No decision states in this run.</div>
+                )}
+              </div>
+              <div>
+                <h3>Decision Types</h3>
+                {autotagTypeRows.length ? (
+                  <HorizontalBars rows={autotagTypeRows} valueFormatter={(v) => String(Math.round(v))} />
+                ) : (
+                  <div className="empty">No decision types in this run.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="split2">
+              <div>
+                <h3>Top Targets</h3>
+                {autotagTopTargets.length ? (
+                  <HorizontalBars
+                    rows={autotagTopTargets.map((row) => ({ id: row.id, label: row.label, value: row.value }))}
+                    valueFormatter={(v) => String(Math.round(v))}
+                  />
+                ) : (
+                  <div className="empty">No target categories in this run.</div>
+                )}
+              </div>
+              <div>
+                <h3>Run Metrics</h3>
+                <div className="kpiGrid autotagKpiGrid">
+                  <div className="kpi">
+                    <span>Avg confidence</span>
+                    <strong>{Math.round((autotagDecisions?.summary?.avg_confidence || 0) * 100)}%</strong>
+                  </div>
+                  <div className="kpi">
+                    <span>Visible rows</span>
+                    <strong>{autotagDecisions?.decision_count || 0}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h3>Generated Categories (JSON)</h3>
+              {autotagCurrentRun ? (
+                <>
+                  <div className="sub autotagGeneratedMeta">
+                    categories: {autotagGeneratedCategoryCount} · sha256: {autotagCurrentRun.categories_generated_sha256 || "-"}
+                    {autotagReviewGate ? ` · gate source: ${autotagReviewGate.source || "missing"}` : ""}
+                  </div>
+                  {autotagReviewGate?.allowed_category_drop_ids?.length ? (
+                    <div className="sub autotagGeneratedMeta">
+                      allowlisted drop ids: {autotagReviewGate.allowed_category_drop_ids.join(", ")}
+                    </div>
+                  ) : null}
+                  {autotagGeneratedJson ? (
+                    <div className="autotagJsonWrap">
+                      <pre className="autotagJsonPre">{autotagGeneratedJson}</pre>
+                    </div>
+                  ) : (
+                    <div className="empty">No categories.generated.json found for this run.</div>
+                  )}
+                </>
+              ) : (
+                <div className="empty">No run selected.</div>
+              )}
+            </div>
+
+            <div>
+              <h3>Decision Rows</h3>
+              {autotagDecisions?.decisions?.length ? (
+                <div className="tableScrollWrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Type</th>
+                        <th>Entity</th>
+                        <th>State</th>
+                        <th>Target</th>
+                        <th>Conf</th>
+                        <th>Reasons</th>
+                        <th>Flags</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {autotagDecisions.decisions.map((row, idx) => (
+                        <tr key={`${row.entity_id}-${row.decision_type}-${row.created_at}-${idx}`}>
+                          <td>{fmtTs(row.created_at)}</td>
+                          <td>{row.decision_type || "-"}</td>
+                          <td>
+                            <div className="autotagEntityCell">
+                              <div>{trimLabel(row.entity || row.entity_id, 80)}</div>
+                              <div className="sub">{row.entity_id}</div>
+                            </div>
+                          </td>
+                          <td>{row.state || "-"}</td>
+                          <td>{row.target_category_id || "unknown"}</td>
+                          <td>{Math.round((row.confidence || 0) * 100)}%</td>
+                          <td>{(row.reasons || []).slice(0, 2).join(" · ") || "-"}</td>
+                          <td>{(row.risk_flags || []).slice(0, 2).join(", ") || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty">No decision rows found for this run.</div>
+              )}
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {page === "stats" && showTopic("websites") ? (
         <section className="card">

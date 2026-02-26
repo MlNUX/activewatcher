@@ -12,7 +12,7 @@
       "id": "communication",
       "label": "Communication",
       "color": "#38bdf8",
-      "apps": ["slack", "discord", "telegram", "signal", "thunderbird"],
+      "apps": ["slack", "discord", "telegram", "signal", "thunderbird", "whatsdesk","vesktop"],
       "domains": ["slack.com", "discord.com", "mail.google.com"]
     },
     {
