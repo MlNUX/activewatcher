@@ -1,0 +1,43 @@
+Classify the provided entities.
+
+Policy parameters:
+- MIN_CONFIDENCE_AUTO_ACCEPT={{MIN_CONFIDENCE_AUTO_ACCEPT}}
+- ENABLE_TITLE_REGEX={{ENABLE_TITLE_REGEX}}
+
+Existing categories JSON:
+{{EXISTING_CATEGORIES_JSON}}
+
+Entity profiles JSON:
+{{ENTITY_PROFILES_JSON}}
+
+Instructions:
+1) Return one classification item per input entity profile.
+2) Prefer existing categories only when evidence is clear.
+3) If not clear, set target_category_id to "unknown".
+4) confidence must be in [0, 1].
+5) reasons: 1-3 short strings.
+6) token_suggestions values must be arrays of strings.
+7) If ENABLE_TITLE_REGEX is false, return title_regex as [].
+
+Return strict JSON in this shape:
+{
+  "version": "autotag.classify.v1",
+  "items": [
+    {
+      "entity_id": "app:example",
+      "entity_type": "app",
+      "entity": "example",
+      "target_category_id": "unknown",
+      "confidence": 0.0,
+      "reasons": ["insufficient evidence"],
+      "risk_flags": ["weak_evidence"],
+      "token_suggestions": {
+        "apps": [],
+        "domains": [],
+        "titles": [],
+        "urls": [],
+        "title_regex": []
+      }
+    }
+  ]
+}

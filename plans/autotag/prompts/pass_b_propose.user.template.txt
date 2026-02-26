@@ -1,0 +1,70 @@
+Propose new categories for unknown entities.
+
+Policy parameters:
+- NEW_CATEGORY_MIN_COMBINED={{NEW_CATEGORY_MIN_COMBINED}}
+- NEW_CATEGORY_MIN_TOTAL_SECONDS={{NEW_CATEGORY_MIN_TOTAL_SECONDS}}
+- NEW_CATEGORY_MIN_ACTIVE_DAYS={{NEW_CATEGORY_MIN_ACTIVE_DAYS}}
+- MAX_NEW_CATEGORIES={{MAX_NEW_CATEGORIES}}
+- ENABLE_TITLE_REGEX={{ENABLE_TITLE_REGEX}}
+
+Existing categories JSON:
+{{EXISTING_CATEGORIES_JSON}}
+
+Unknown entity profiles JSON:
+{{UNKNOWN_ENTITY_PROFILES_JSON}}
+
+Cluster hints JSON:
+{{CLUSTER_HINTS_JSON}}
+
+Instructions:
+1) Create up to MAX_NEW_CATEGORIES coherent proposals.
+2) Each proposal must include valid members selected from UNKNOWN_ENTITY_PROFILES_JSON.
+3) Compute coverage to match the members in that proposal.
+4) cohesion_score must be in [0, 1].
+5) nearest_existing entries should compare to existing categories.
+6) If ENABLE_TITLE_REGEX is false, return rule_tokens.title_regex as [].
+7) Return all ungrouped unknown entity_ids in left_unassigned_entity_ids.
+
+Return strict JSON in this shape:
+{
+  "version": "autotag.propose.v1",
+  "proposals": [
+    {
+      "id": "example_category",
+      "label": "Example Category",
+      "description": "Short rationale for this proposal.",
+      "members": [
+        {
+          "entity_id": "app:example",
+          "entity_type": "app",
+          "entity": "example",
+          "confidence": 0.8
+        }
+      ],
+      "coverage": {
+        "unique_apps": 1,
+        "unique_domains": 0,
+        "combined": 1,
+        "total_seconds": 3600,
+        "active_days": 1
+      },
+      "cohesion_score": 0.8,
+      "not_subcategory_reason": "This cluster is distinct from existing categories.",
+      "nearest_existing": [
+        {
+          "category_id": "coding",
+          "similarity": 0.3,
+          "reason": "Some overlap in tooling terms, but distinct intent."
+        }
+      ],
+      "rule_tokens": {
+        "apps": [],
+        "domains": [],
+        "titles": [],
+        "urls": [],
+        "title_regex": []
+      }
+    }
+  ],
+  "left_unassigned_entity_ids": []
+}

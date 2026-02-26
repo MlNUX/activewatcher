@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://activewatcher.local/schemas/autotag.propose.v1.schema.json",
+  "title": "Autotag Pass B Propose v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "proposals",
+    "left_unassigned_entity_ids"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "autotag.propose.v1"
+    },
+    "proposals": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/proposal"
+      }
+    },
+    "left_unassigned_entity_ids": {
+      "$ref": "#/$defs/stringArray"
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "tokenMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apps",
+        "domains",
+        "titles",
+        "urls",
+        "title_regex"
+      ],
+      "properties": {
+        "apps": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "domains": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "titles": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "urls": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "title_regex": {
+          "$ref": "#/$defs/stringArray"
+        }
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity_id",
+        "entity_type",
+        "entity",
+        "confidence"
+      ],
+      "properties": {
+        "entity_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entity_type": {
+          "type": "string",
+          "enum": [
+            "app",
+            "domain"
+          ]
+        },
+        "entity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unique_apps",
+        "unique_domains",
+        "combined",
+        "total_seconds",
+        "active_days"
+      ],
+      "properties": {
+        "unique_apps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unique_domains": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "combined": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "active_days": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "nearestExisting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category_id",
+        "similarity",
+        "reason"
+      ],
+      "properties": {
+        "category_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "similarity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "description",
+        "members",
+        "coverage",
+        "cohesion_score",
+        "not_subcategory_reason",
+        "nearest_existing",
+        "rule_tokens"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,31}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 220
+        },
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/member"
+          }
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage"
+        },
+        "cohesion_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "not_subcategory_reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 220
+        },
+        "nearest_existing": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nearestExisting"
+          }
+        },
+        "rule_tokens": {
+          "$ref": "#/$defs/tokenMap"
+        }
+      }
+    }
+  }
+}
