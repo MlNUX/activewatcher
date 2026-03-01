@@ -102,8 +102,7 @@ class OllamaClient:
         if (
             "context" in lowered
             or "too long" in lowered
-            or "token" in lowered
-            and "limit" in lowered
+            or ("token" in lowered and "limit" in lowered)
         ):
             raise LlmContextOverflowError(
                 f"LLM context overflow ({status}): {text[:200]}"
