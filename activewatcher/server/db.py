@@ -41,5 +41,31 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_events_bucket_source_start ON events(bucket, source, start_ts)"
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_bucket_start ON events(bucket, start_ts)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_events_bucket_start ON events(bucket, start_ts)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_end ON events(end_ts)")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS timers (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          duration_seconds INTEGER NOT NULL DEFAULT 0,
+          elapsed_seconds REAL NOT NULL DEFAULT 0,
+          running_since_ts TEXT,
+          state TEXT NOT NULL DEFAULT 'idle',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (kind IN ('timer', 'counter')),
+          CHECK (state IN ('idle', 'running', 'paused', 'finished')),
+          CHECK (duration_seconds >= 0),
+          CHECK (elapsed_seconds >= 0)
+        )
+        """.strip()
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_timers_state ON timers(state)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_timers_updated_at ON timers(updated_at)"
+    )

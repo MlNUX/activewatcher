@@ -1,8 +1,11 @@
 import { Fragment, type MouseEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { TimersPage } from "./TimersPage";
+
 type RangeKey = "24h" | "1w" | "1m" | "all";
 type DayWindowMode = "rolling" | "midnight";
+type PageId = "dashboard" | "stats" | "timers";
 type TopicId =
   | "all"
   | "overview"
@@ -300,7 +303,11 @@ const MONITOR_SETUP_FILTERS: Array<{ key: MonitorSetupFilter; label: string }> =
   { key: "multi", label: "multi monitor" }
 ];
 
-function requestedLoadKeys(page: "dashboard" | "stats", topic: TopicId): Set<LoadKey> {
+function requestedLoadKeys(page: PageId, topic: TopicId): Set<LoadKey> {
+  if (page === "timers") {
+    return new Set<LoadKey>();
+  }
+
   if (page === "dashboard") {
     return new Set<LoadKey>(["summary", "categories"]);
   }
@@ -362,6 +369,13 @@ function parseTopicId(v: string | null | undefined): TopicId {
     return s;
   }
   return "all";
+}
+
+function parsePageId(pathname: string): PageId {
+  const p = String(pathname || "").replace(/\/+$/, "");
+  if (p.endsWith("/ui/stats")) return "stats";
+  if (p.endsWith("/ui/timers")) return "timers";
+  return "dashboard";
 }
 
 function pathPrefixBeforeUi(pathname: string): string {
@@ -737,7 +751,7 @@ function addMs(iso: string, deltaMs: number): string {
 async function resolveWindow(
   range: RangeKey,
   dayWindowMode: DayWindowMode,
-  page: "dashboard" | "stats",
+  page: PageId,
   apiBase: string
 ): Promise<TimeWindow> {
   const to = nowIso();
@@ -1751,7 +1765,7 @@ function LegacyTimeline({
 
 export default function App() {
   const pathname = String(window.location.pathname || "").replace(/\/+$/, "");
-  const page: "dashboard" | "stats" = pathname.endsWith("/ui/stats") ? "stats" : "dashboard";
+  const page: PageId = parsePageId(pathname);
   const searchParams = new URLSearchParams(String(window.location.search || ""));
   const uiPrefix = pathPrefixBeforeUi(pathname);
   const uiBase = `${uiPrefix}/ui`;
@@ -1794,15 +1808,15 @@ export default function App() {
     replaceQuery(range, topic, next);
   }
 
-  function hrefFor(target: "dashboard" | "stats"): string {
+  function hrefFor(target: PageId): string {
     const params = new URLSearchParams();
     params.set("range", range);
     if (target === "stats") params.set("topic", topic);
     if (range === "24h" && dayWindowMode === "midnight") params.set("day_window", "midnight");
     const qs = params.toString();
-    return target === "dashboard"
-      ? `${uiBase}${qs ? `?${qs}` : ""}`
-      : `${uiBase}/stats${qs ? `?${qs}` : ""}`;
+    if (target === "dashboard") return `${uiBase}${qs ? `?${qs}` : ""}`;
+    if (target === "stats") return `${uiBase}/stats${qs ? `?${qs}` : ""}`;
+    return `${uiBase}/timers${qs ? `?${qs}` : ""}`;
   }
 
   const [windowRange, setWindowRange] = useState<TimeWindow | null>(null);
@@ -1838,6 +1852,12 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (page === "timers") {
+      setLoading(false);
+      setError("");
+      return;
+    }
+
     let cancelled = false;
     let timer: number | null = null;
     let activeLoadId = 0;
@@ -3092,6 +3112,9 @@ export default function App() {
   }
 
   const showTopic = (id: TopicId): boolean => {
+    if (page === "timers") {
+      return false;
+    }
     if (page === "dashboard") {
       return id === "overview" || id === "apps" || id === "categories";
     }
@@ -3235,20 +3258,29 @@ export default function App() {
               <a href={hrefFor("stats")} className={page === "stats" ? "pill active" : "pill"}>
                 stats
               </a>
+              <a href={hrefFor("timers")} className={page === "timers" ? "pill active" : "pill"}>
+                timers
+              </a>
             </div>
           </div>
           <div className="sub">
-            {windowRange ? `range: ${rangeLabel} · ${fmtTs(windowRange.from)} → ${fmtTs(windowRange.to)}` : `range: ${rangeLabel}`}
+            {page === "timers"
+              ? "named timers + counters with start/pause/stop"
+              : windowRange
+                ? `range: ${rangeLabel} · ${fmtTs(windowRange.from)} → ${fmtTs(windowRange.to)}`
+                : `range: ${rangeLabel}`}
           </div>
         </div>
 
         <div>
           <div className="controls">
-            {RANGES.map((r) => (
-              <button key={r.key} className={r.key === range ? "pill active" : "pill"} onClick={() => onRangeChange(r.key)}>
-                {page === "dashboard" && r.key === "24h" ? "heute" : r.label}
-              </button>
-            ))}
+            {page !== "timers"
+              ? RANGES.map((r) => (
+                  <button key={r.key} className={r.key === range ? "pill active" : "pill"} onClick={() => onRangeChange(r.key)}>
+                    {page === "dashboard" && r.key === "24h" ? "heute" : r.label}
+                  </button>
+                ))
+              : null}
             <button className="pill" onClick={() => setReloadKey((v) => v + 1)}>
               refresh
             </button>
@@ -3287,12 +3319,26 @@ export default function App() {
       <section className={`card statusCard ${statusTone}`}>
         <div className="sub statusLine">
           <span className="statusBadge">{statusBadge}</span>
-          <span>{updatedAt ? `updated ${updatedAt}` : loading ? "fetching data..." : "waiting for first refresh"}</span>
+          <span>
+            {page === "timers"
+              ? "timer controls are local + persisted in sqlite"
+              : updatedAt
+                ? `updated ${updatedAt}`
+                : loading
+                  ? "fetching data..."
+                  : "waiting for first refresh"}
+          </span>
           <span className={error ? "statusIssue" : "statusHealthy"}>
-            {error ? `partial errors: ${error}` : "all requested data sources reachable"}
+            {page === "timers"
+              ? "timer controls available"
+              : error
+                ? `partial errors: ${error}`
+                : "all requested data sources reachable"}
           </span>
         </div>
       </section>
+
+      {page === "timers" ? <TimersPage apiBase={apiBase} /> : null}
 
       {showTopic("overview") ? (
         <section className="card">
@@ -3360,19 +3406,21 @@ export default function App() {
             <div className="wsFilterRow">
               <span className="wsFilterLabel">run</span>
               <div className="autotagRunControl">
-                <select
-                  className="autotagSelect"
-                  value={autotagCurrentRun?.run_id || ""}
-                  onChange={(e) => setAutotagRunId(e.target.value)}
-                  disabled={!autotagRuns.length}
-                >
-                  {!autotagRuns.length ? <option value="">no runs</option> : null}
-                  {autotagRuns.map((row) => (
-                    <option key={row.run_id} value={row.run_id}>
-                      {row.run_id}
-                    </option>
-                  ))}
-                </select>
+                <div className="timersSelectWrap">
+                  <select
+                    className="autotagSelect timersSelect"
+                    value={autotagCurrentRun?.run_id || ""}
+                    onChange={(e) => setAutotagRunId(e.target.value)}
+                    disabled={!autotagRuns.length}
+                  >
+                    {!autotagRuns.length ? <option value="">no runs</option> : null}
+                    {autotagRuns.map((row) => (
+                      <option key={row.run_id} value={row.run_id}>
+                        {row.run_id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               {autotagCurrentRun ? (
                 <span className={`autotagApplyBadge ${autotagCurrentRun.recommend_apply ? "ok" : "warn"}`}>

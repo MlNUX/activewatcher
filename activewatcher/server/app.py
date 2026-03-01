@@ -16,7 +16,7 @@ from activewatcher.common import config as app_config
 from activewatcher.common.models import StateEvent
 from activewatcher.common.time import parse_rfc3339, to_utc, utcnow
 
-from . import db, ingest, reports
+from . import db, ingest, reports, timers
 
 
 def _parse_dt_param(value: str | None, *, default: datetime) -> datetime:
@@ -161,6 +161,10 @@ def create_app(db_path: str | Path) -> FastAPI:
     def ui_stats():
         return _ui_response()
 
+    @app.get("/ui/timers")
+    def ui_timers():
+        return _ui_response()
+
     @app.get("/ui/favicon.svg")
     def ui_favicon():
         icon_path = frontend_dist / "favicon.svg"
@@ -278,6 +282,63 @@ def create_app(db_path: str | Path) -> FastAPI:
             )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.get("/v1/timers")
+    def get_timers(conn=Depends(_get_conn)) -> dict[str, Any]:
+        return timers.list_timers(conn)
+
+    @app.post("/v1/timers")
+    def post_timer(payload: dict[str, Any], conn=Depends(_get_conn)) -> dict[str, Any]:
+        try:
+            timer = timers.create_timer(
+                conn,
+                name=payload.get("name"),
+                kind=payload.get("kind"),
+                duration_seconds=payload.get("duration_seconds"),
+            )
+            return {"status": "ok", "timer": timer}
+        except timers.TimerValidationError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    @app.post("/v1/timers/{timer_id}/start")
+    def post_timer_start(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+        try:
+            timer = timers.start_timer(conn, timer_id=timer_id)
+            return {"status": "ok", "timer": timer}
+        except timers.TimerNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.post("/v1/timers/{timer_id}/pause")
+    def post_timer_pause(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+        try:
+            timer = timers.pause_timer(conn, timer_id=timer_id)
+            return {"status": "ok", "timer": timer}
+        except timers.TimerNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.post("/v1/timers/{timer_id}/stop")
+    def post_timer_stop(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+        try:
+            timer = timers.stop_timer(conn, timer_id=timer_id)
+            return {"status": "ok", "timer": timer}
+        except timers.TimerNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.post("/v1/timers/{timer_id}/reactivate")
+    def post_timer_reactivate(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+        try:
+            timer = timers.reactivate_timer(conn, timer_id=timer_id)
+            return {"status": "ok", "timer": timer}
+        except timers.TimerNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.post("/v1/timers/{timer_id}/delete")
+    def post_timer_delete(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+        try:
+            timer = timers.delete_timer(conn, timer_id=timer_id)
+            return {"status": "ok", "timer": timer}
+        except timers.TimerNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.get("/v1/autotag/runs")
     def get_autotag_runs(

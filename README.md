@@ -58,6 +58,15 @@ visible_all_monitors = false
 
 After changing this, restart the Hyprland watcher.
 
+## Timers View
+
+The UI now includes a third top-level tab: `timers`.
+
+- Create named entries as either `timer` (countdown) or `counter` (count up).
+- Controls per entry: `start`, `pause`, `stop`.
+- `stop` resets both timer and counter.
+- State is persisted in the local SQLite database.
+
 ## Browser Plugin
 
 Extension path: `extensions/browser-tabs/`  
