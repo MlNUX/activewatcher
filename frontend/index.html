@@ -12,8 +12,14 @@
         const mode = String(window.localStorage.getItem("aw.ui.theme") || "")
           .trim()
           .toLowerCase();
+        const contrast = String(window.localStorage.getItem("aw.ui.contrast") || "")
+          .trim()
+          .toLowerCase();
         if (mode === "light" || mode === "white") {
           document.body.classList.add("theme-light");
+        }
+        if (contrast === "high" || contrast === "high-contrast") {
+          document.body.classList.add("theme-high-contrast");
         }
       } catch {}
     </script>

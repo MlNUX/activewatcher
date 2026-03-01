@@ -3,6 +3,18 @@ import { createPortal } from "react-dom";
 
 import { SettingsPage } from "./SettingsPage";
 import { TimersPage } from "./TimersPage";
+import {
+  applyUiSettingsSnapshot,
+  getContrastMode,
+  getTimerNotificationsEnabled,
+  getTimerSoundEnabled,
+  resetUiSettings,
+  setContrastMode,
+  setTimerNotificationsEnabled,
+  setTimerSoundEnabled,
+  type ContrastMode,
+  type UiSettingsSnapshot
+} from "./uiSettings";
 import { useThemeMode } from "./useThemeMode";
 
 type RangeKey = "24h" | "1w" | "1m" | "all";
@@ -1784,6 +1796,67 @@ export default function App() {
   const [monitorSetupFilter, setMonitorSetupFilter] = useState<MonitorSetupFilter>("all");
   const [reloadKey, setReloadKey] = useState(0);
   const [themeMode, onThemeModeChange] = useThemeMode();
+  const [contrastMode, setContrastModeState] = useState<ContrastMode>(() => getContrastMode());
+  const [timerNotifications, setTimerNotificationsState] = useState(() => getTimerNotificationsEnabled());
+  const [timerSound, setTimerSoundState] = useState(() => getTimerSoundEnabled());
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.toggle("theme-high-contrast", contrastMode === "high");
+  }, [contrastMode]);
+
+  function onContrastModeChange(next: ContrastMode): void {
+    setContrastModeState(next);
+    setContrastMode(next);
+  }
+
+  function onTimerNotificationsChange(enabled: boolean): void {
+    setTimerNotificationsState(enabled);
+    setTimerNotificationsEnabled(enabled);
+  }
+
+  function onTimerSoundChange(enabled: boolean): void {
+    setTimerSoundState(enabled);
+    setTimerSoundEnabled(enabled);
+  }
+
+  function syncSettings(next: UiSettingsSnapshot): void {
+    onThemeModeChange(next.themeMode);
+    onContrastModeChange(next.contrastMode);
+    onTimerNotificationsChange(next.timerNotifications);
+    onTimerSoundChange(next.timerSound);
+  }
+
+  function onSettingsChange(patch: Partial<UiSettingsSnapshot>): void {
+    if (patch.themeMode) onThemeModeChange(patch.themeMode);
+    if (patch.contrastMode) onContrastModeChange(patch.contrastMode);
+    if (typeof patch.timerNotifications === "boolean") onTimerNotificationsChange(patch.timerNotifications);
+    if (typeof patch.timerSound === "boolean") onTimerSoundChange(patch.timerSound);
+  }
+
+  function onSettingsImport(payload: unknown): void {
+    const resolved =
+      payload && typeof payload === "object" && !Array.isArray(payload) && "settings" in payload
+        ? (payload as { settings: unknown }).settings
+        : payload;
+    const imported = applyUiSettingsSnapshot(resolved);
+    syncSettings(imported);
+  }
+
+  function onSettingsReset(): void {
+    const defaults = resetUiSettings();
+    syncSettings(defaults);
+  }
+
+  const uiSettings = useMemo<UiSettingsSnapshot>(
+    () => ({
+      themeMode,
+      contrastMode,
+      timerNotifications,
+      timerSound
+    }),
+    [themeMode, contrastMode, timerNotifications, timerSound]
+  );
 
   function replaceQuery(nextRange: RangeKey, nextTopic: TopicId, nextDayWindowMode: DayWindowMode): void {
     const params = new URLSearchParams(String(window.location.search || ""));
@@ -3275,7 +3348,7 @@ export default function App() {
             {page === "timers"
               ? "named timers + counters with start/pause/stop"
               : page === "settings"
-                ? "appearance preferences"
+                ? "appearance, notifications + export tools"
               : windowRange
                 ? `range: ${rangeLabel} · ${fmtTs(windowRange.from)} → ${fmtTs(windowRange.to)}`
                 : `range: ${rangeLabel}`}
@@ -3352,8 +3425,18 @@ export default function App() {
         </div>
       </section>
 
-      {page === "timers" ? <TimersPage apiBase={apiBase} /> : null}
-      {page === "settings" ? <SettingsPage themeMode={themeMode} onThemeModeChange={onThemeModeChange} /> : null}
+      {page === "timers" ? (
+        <TimersPage apiBase={apiBase} timerNotifications={timerNotifications} timerSound={timerSound} />
+      ) : null}
+      {page === "settings" ? (
+        <SettingsPage
+          apiBase={apiBase}
+          settings={uiSettings}
+          onChange={onSettingsChange}
+          onImportSettings={onSettingsImport}
+          onResetSettings={onSettingsReset}
+        />
+      ) : null}
 
       {showTopic("overview") ? (
         <section className="card">

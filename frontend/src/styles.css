@@ -54,6 +54,22 @@ body.theme-light {
   --shadow-card: 0 10px 24px rgba(45, 78, 118, 0.14);
 }
 
+body.theme-high-contrast {
+  --line: rgba(194, 224, 255, 0.54);
+  --line-strong: rgba(132, 213, 255, 0.9);
+  --ink: rgba(255, 255, 255, 0.99);
+  --muted: rgba(231, 243, 255, 0.92);
+  --muted-soft: rgba(211, 228, 248, 0.86);
+}
+
+body.theme-light.theme-high-contrast {
+  --line: rgba(57, 105, 157, 0.58);
+  --line-strong: rgba(29, 111, 192, 0.88);
+  --ink: rgba(8, 31, 58, 0.98);
+  --muted: rgba(21, 55, 92, 0.92);
+  --muted-soft: rgba(31, 68, 108, 0.78);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -194,6 +210,17 @@ h3 {
   border-color: rgba(125, 255, 235, 0.65);
   background: linear-gradient(110deg, rgba(113, 240, 219, 0.98), rgba(95, 202, 255, 0.96));
   box-shadow: 0 0 0 1px rgba(7, 20, 28, 0.26) inset;
+}
+
+body.theme-high-contrast .pill {
+  border-width: 2px;
+  font-weight: 620;
+}
+
+body.theme-high-contrast .card,
+body.theme-high-contrast .header,
+body.theme-high-contrast .subnav {
+  border-color: var(--line-strong);
 }
 
 .pill.danger {
@@ -1480,7 +1507,33 @@ h3 {
   padding: 11px;
   background: rgba(7, 15, 28, 0.52);
   display: grid;
-  gap: 11px;
+  gap: 14px;
+}
+
+.settingsSection {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed rgba(166, 213, 255, 0.2);
+}
+
+.settingsSection:last-of-type {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.settingsSectionHd {
+  display: grid;
+  gap: 4px;
+}
+
+.settingsSectionTitle {
+  margin: 0;
+  font-size: 11px;
+}
+
+.settingsSectionDesc {
+  line-height: 1.35;
 }
 
 .settingsGrid {
@@ -1508,6 +1561,35 @@ h3 {
   flex-wrap: wrap;
 }
 
+.settingsActionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.settingsActionGrid .pill {
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  justify-content: center;
+}
+
+.settingsHiddenInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settingsStatus.ok {
+  color: rgba(167, 255, 242, 0.98);
+}
+
+.settingsStatus.err {
+  color: rgba(255, 176, 176, 0.98);
+}
+
 .settingsHint {
   color: var(--muted);
 }
@@ -1532,6 +1614,10 @@ body.theme-light .timersCreatePanel,
 body.theme-light .settingsPanel {
   border-color: rgba(115, 157, 203, 0.28);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(247, 252, 255, 0.76));
+}
+
+body.theme-light .settingsSection {
+  border-bottom-color: rgba(92, 140, 190, 0.26);
 }
 
 body.theme-light .timersHint,

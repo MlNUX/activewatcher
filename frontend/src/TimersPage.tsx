@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type TimerKind = "timer" | "counter";
 type TimerState = "idle" | "running" | "paused" | "finished";
@@ -89,7 +89,63 @@ async function postJson<T>(url: string, payload: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function TimersPage({ apiBase }: { apiBase: string }) {
+async function notifyTimerFinished(name: string): Promise<void> {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+  let permission = Notification.permission;
+  if (permission === "default") {
+    try {
+      permission = await Notification.requestPermission();
+    } catch {
+      return;
+    }
+  }
+  if (permission !== "granted") return;
+  new Notification("Timer finished", {
+    body: `${name} is done.`,
+    tag: `timer-finished-${name}`
+  });
+}
+
+function playTimerFinishedSound(): void {
+  if (typeof window === "undefined") return;
+  const Ctx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) return;
+
+  try {
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(660, ctx.currentTime + 0.18);
+
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.14, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.33);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.34);
+
+    window.setTimeout(() => {
+      void ctx.close();
+    }, 420);
+  } catch {
+    // ignore audio failures (autoplay/browser policy)
+  }
+}
+
+export function TimersPage({
+  apiBase,
+  timerNotifications,
+  timerSound
+}: {
+  apiBase: string;
+  timerNotifications: boolean;
+  timerSound: boolean;
+}) {
   const [timers, setTimers] = useState<TimerRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -103,6 +159,7 @@ export function TimersPage({ apiBase }: { apiBase: string }) {
   const [createPending, setCreatePending] = useState(false);
   const [activeTimerId, setActiveTimerId] = useState<number | null>(null);
   const [listView, setListView] = useState<TimerListView>("active");
+  const prevStatesRef = useRef<Map<number, TimerState>>(new Map());
 
   const runningCount = useMemo(
     () => timers.reduce((count, row) => (row.state === "running" ? count + 1 : count), 0),
@@ -167,6 +224,28 @@ export function TimersPage({ apiBase }: { apiBase: string }) {
       if (loopHandle != null) window.clearTimeout(loopHandle);
     };
   }, [apiBase, refreshKey]);
+
+  useEffect(() => {
+    const prev = prevStatesRef.current;
+    const next = new Map<number, TimerState>();
+
+    for (const row of timers) {
+      next.set(row.id, row.state);
+      const previousState = prev.get(row.id);
+      if (row.kind !== "timer") continue;
+      if (!previousState || previousState === "finished") continue;
+      if (row.state !== "finished") continue;
+
+      if (timerNotifications) {
+        void notifyTimerFinished(row.name);
+      }
+      if (timerSound) {
+        playTimerFinishedSound();
+      }
+    }
+
+    prevStatesRef.current = next;
+  }, [timers, timerNotifications, timerSound]);
 
   async function createTimer(): Promise<void> {
     const trimmedName = String(name || "").trim();

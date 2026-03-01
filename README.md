@@ -71,7 +71,11 @@ The UI includes top-level tabs: `dashboard`, `stats`, `timers`, `settings`.
 ## Settings View
 
 - `white mode` toggle switches between dark and light themes.
-- Theme preference is saved in browser local storage (`aw.ui.theme`).
+- `high contrast` toggle increases readability/contrast.
+- Timer end alerts can be enabled (`desktop notification` and `sound alert`).
+- You can export tracked data and timers as JSON.
+- Settings can be exported/imported and reset to defaults.
+- Preferences are saved in browser local storage (for example `aw.ui.theme`).
 
 ## Browser Plugin
 
