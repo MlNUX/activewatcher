@@ -31,12 +31,15 @@ def _normalize_unix_socket_url(raw: str) -> str:
     if parsed.scheme != "http+unix":
         raise LlmError("unsupported unix socket URL scheme")
 
-    encoded = ""
-    if parsed.netloc:
-        encoded += parsed.netloc
-    if parsed.path:
-        encoded += parsed.path
-    socket_path = unquote(encoded)
+    encoded_socket = f"{parsed.netloc}{parsed.path}" if parsed.netloc else parsed.path
+    if not encoded_socket:
+        raise LlmError("unix socket path missing")
+
+    socket_path = unquote(encoded_socket)
+    for marker, suffix in ((".sock/", ".sock"), (".socket/", ".socket")):
+        if marker in socket_path:
+            socket_path = socket_path.split(marker, 1)[0] + suffix
+            break
     if not socket_path.startswith("/"):
         raise LlmError("unix socket path must be absolute")
     return f"unix://{socket_path}"

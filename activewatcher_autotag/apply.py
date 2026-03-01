@@ -10,6 +10,30 @@ from .merge_rules import validate_categories_payload
 from .runtime import file_sha256, read_json, write_json
 
 
+_REQUIRED_EVAL_GATES = {
+    "hard_policy_ok",
+    "schema_valid_outputs",
+    "other_not_worse",
+    "category_drop_guard",
+    "goldset_exists",
+    "goldset_size_ok",
+    "goldset_f1_not_lower",
+    "pass_b_apply_ok",
+}
+
+
+def _legacy_recommend_apply(
+    payload: dict[str, Any], gates: dict[str, Any]
+) -> bool | None:
+    legacy_gate = gates.get("recommend_apply")
+    if isinstance(legacy_gate, bool):
+        return legacy_gate
+    legacy_top_level = payload.get("recommend_apply")
+    if isinstance(legacy_top_level, bool):
+        return legacy_top_level
+    return None
+
+
 def _load_review_gate(run_root: Path) -> dict[str, Any]:
     path = run_root / "review-gate.json"
     if path.is_file():
@@ -42,7 +66,7 @@ def _require_review_gate(run_root: Path, generated_sha: str) -> dict[str, Any]:
             raise ValueError(f"review gate missing field: {key}")
     if str(payload.get("run_id") or "") != run_root.name:
         raise ValueError("review gate run_id does not match run")
-    if bool(payload.get("approved")) is not True:
+    if payload.get("approved") is not True:
         raise ValueError("review gate not approved")
     if str(payload.get("categories_generated_sha256") or "") != generated_sha:
         raise ValueError("review gate hash mismatch")
@@ -61,8 +85,30 @@ def _require_evaluation(run_root: Path, generated_sha: str) -> dict[str, Any]:
     if str(payload.get("categories_generated_sha256") or "") != generated_sha:
         raise ValueError("evaluation categories hash mismatch")
     gates_raw = payload.get("gates")
-    gates: dict[str, Any] = gates_raw if isinstance(gates_raw, dict) else {}
-    if not all(bool(v) for v in gates.values()):
+    if not isinstance(gates_raw, dict):
+        raise ValueError("evaluation gates missing")
+    gates: dict[str, Any] = gates_raw
+    if not gates:
+        raise ValueError("evaluation gates missing")
+
+    for key, value in gates.items():
+        if not isinstance(key, str):
+            raise ValueError("evaluation gates contain invalid key")
+        if not isinstance(value, bool):
+            raise ValueError(f"evaluation gate '{key}' is not boolean")
+
+    missing = sorted(_REQUIRED_EVAL_GATES - set(gates.keys()))
+    if missing:
+        legacy_recommend_apply = _legacy_recommend_apply(payload, gates)
+        if legacy_recommend_apply is None:
+            raise ValueError(
+                f"evaluation gates missing required keys: {', '.join(missing)}"
+            )
+        if not legacy_recommend_apply:
+            raise ValueError("evaluation recommend_apply is false; apply is blocked")
+        return payload
+
+    if not all(gates.get(key) is True for key in _REQUIRED_EVAL_GATES):
         raise ValueError("evaluation gates failed; apply is blocked")
     return payload
 

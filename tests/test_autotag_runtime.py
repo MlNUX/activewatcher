@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from activewatcher_autotag.runtime import normalize_run_id, run_lock
@@ -45,6 +46,38 @@ class RunLockTests(unittest.TestCase):
 
                 with run_lock(force_unlock=False):
                     self.assertTrue(lockfile.is_file())
+            finally:
+                if old_xdg_data_home is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = old_xdg_data_home
+
+    def test_fresh_invalid_pid_lock_is_replaced(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            old_xdg_data_home = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = tmp
+            try:
+                lockfile = Path(tmp) / "activewatcher" / "autotag" / ".run.lock"
+                lockfile.parent.mkdir(parents=True, exist_ok=True)
+                lockfile.write_text(
+                    json.dumps(
+                        {
+                            "pid": "not-a-number",
+                            "host": "broken-host",
+                            "started_at": datetime.now(timezone.utc)
+                            .isoformat()
+                            .replace("+00:00", "Z"),
+                            "run_id": "fresh-invalid",
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                with run_lock(force_unlock=False) as held_lock:
+                    self.assertEqual(held_lock, lockfile)
+                    lock_data = json.loads(lockfile.read_text(encoding="utf-8"))
+                    self.assertEqual(int(lock_data.get("pid") or 0), os.getpid())
             finally:
                 if old_xdg_data_home is None:
                     os.environ.pop("XDG_DATA_HOME", None)

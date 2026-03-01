@@ -366,9 +366,9 @@ function parseTopicId(v: string | null | undefined): TopicId {
 
 function pathPrefixBeforeUi(pathname: string): string {
   const p = String(pathname || "");
-  const idx = p.indexOf("/ui");
-  if (idx <= 0) return "";
-  return p.slice(0, idx);
+  const m = p.match(/^(.*)\/ui(?:\/.*)?$/);
+  if (!m) return "";
+  return m[1] || "";
 }
 
 const BROWSER_HINTS = [
@@ -737,7 +737,8 @@ function addMs(iso: string, deltaMs: number): string {
 async function resolveWindow(
   range: RangeKey,
   dayWindowMode: DayWindowMode,
-  page: "dashboard" | "stats"
+  page: "dashboard" | "stats",
+  apiBase: string
 ): Promise<TimeWindow> {
   const to = nowIso();
   if (range === "24h") {
@@ -755,7 +756,7 @@ async function resolveWindow(
   if (range === "1w") return { from: addMs(to, -7 * 24 * 3600 * 1000), to };
   if (range === "1m") return { from: addMs(to, -30 * 24 * 3600 * 1000), to };
 
-  const res = await fetch("/v1/range?bucket=window", { cache: "no-store" });
+  const res = await fetch(`${apiBase}/range?bucket=window`, { cache: "no-store" });
   if (!res.ok) return { from: addMs(to, -24 * 3600 * 1000), to };
   const data = (await res.json()) as { empty?: boolean; from_ts?: string };
   const from = data.empty || !data.from_ts ? addMs(to, -24 * 3600 * 1000) : data.from_ts;
@@ -1754,6 +1755,7 @@ export default function App() {
   const searchParams = new URLSearchParams(String(window.location.search || ""));
   const uiPrefix = pathPrefixBeforeUi(pathname);
   const uiBase = `${uiPrefix}/ui`;
+  const apiBase = `${uiPrefix}/v1`;
   const initialRange = parseRangeKey(searchParams.get("range"));
   const initialTopic = parseTopicId(searchParams.get("topic"));
   const initialDayWindowMode =
@@ -1799,7 +1801,7 @@ export default function App() {
     if (range === "24h" && dayWindowMode === "midnight") params.set("day_window", "midnight");
     const qs = params.toString();
     return target === "dashboard"
-      ? `${uiBase}/${qs ? `?${qs}` : ""}`
+      ? `${uiBase}${qs ? `?${qs}` : ""}`
       : `${uiBase}/stats${qs ? `?${qs}` : ""}`;
   }
 
@@ -1855,7 +1857,7 @@ export default function App() {
 
       try {
         const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
-        const timeWindow = await resolveWindow(range, effectiveDayWindowMode, page);
+        const timeWindow = await resolveWindow(range, effectiveDayWindowMode, page, apiBase);
         if (cancelled || loadId !== activeLoadId) return;
         setWindowRange(timeWindow);
 
@@ -1892,18 +1894,18 @@ export default function App() {
         }
 
         if (requested.has("summary")) {
-          queue<SummaryResponse>("summary", `/v1/summary?${summaryQuery}`, (value) => setSummary(value), () => setSummary(null));
+          queue<SummaryResponse>("summary", `${apiBase}/summary?${summaryQuery}`, (value) => setSummary(value), () => setSummary(null));
         }
         if (requested.has("categories")) {
           queue<CategoriesResponse>(
             "categories",
-            `/v1/categories?mode=auto&${query}`,
+            `${apiBase}/categories?mode=auto&${query}`,
             (value) => setCategories(value),
             () => setCategories(null)
           );
         }
         if (requested.has("autotag")) {
-          const p = fetchJson<AutotagRunsResponse>("/v1/autotag/runs?limit=100")
+          const p = fetchJson<AutotagRunsResponse>(`${apiBase}/autotag/runs?limit=100`)
             .then(async (runsValue) => {
               if (cancelled || loadId !== activeLoadId) return;
               const runs = Array.isArray(runsValue?.runs) ? runsValue.runs : [];
@@ -1923,7 +1925,7 @@ export default function App() {
                 return;
               }
 
-              const decisionsUrl = `/v1/autotag/decisions?run_id=${encodeURIComponent(selectedRunId)}&limit=600`;
+              const decisionsUrl = `${apiBase}/autotag/decisions?run_id=${encodeURIComponent(selectedRunId)}&limit=600`;
               try {
                 const decisionsValue = await fetchJson<AutotagDecisionsResponse>(decisionsUrl);
                 if (cancelled || loadId !== activeLoadId) return;
@@ -1934,7 +1936,7 @@ export default function App() {
                 setAutotagDecisions(null);
               }
 
-              const generatedUrl = `/v1/autotag/generated?run_id=${encodeURIComponent(selectedRunId)}`;
+              const generatedUrl = `${apiBase}/autotag/generated?run_id=${encodeURIComponent(selectedRunId)}`;
               try {
                 const generatedValue = await fetchJson<AutotagGeneratedResponse>(generatedUrl);
                 if (cancelled || loadId !== activeLoadId) return;
@@ -1957,7 +1959,7 @@ export default function App() {
         if (requested.has("window")) {
           queue<EventsResponse>(
             "window",
-            `/v1/events?bucket=window&${query}`,
+            `${apiBase}/events?bucket=window&${query}`,
             (value) => setWindowEvents(Array.isArray(value.events) ? value.events : []),
             () => setWindowEvents([])
           );
@@ -1965,7 +1967,7 @@ export default function App() {
         if (requested.has("workspace")) {
           queue<EventsResponse>(
             "workspace",
-            `/v1/events?bucket=workspace&${query}`,
+            `${apiBase}/events?bucket=workspace&${query}`,
             (value) => setWorkspaceEvents(Array.isArray(value.events) ? value.events : []),
             () => setWorkspaceEvents([])
           );
@@ -1973,7 +1975,7 @@ export default function App() {
         if (requested.has("workspace_switch")) {
           queue<EventsResponse>(
             "workspace_switch",
-            `/v1/events?bucket=workspace_switch&${query}`,
+            `${apiBase}/events?bucket=workspace_switch&${query}`,
             (value) => setWorkspaceSwitchEvents(Array.isArray(value.events) ? value.events : []),
             () => setWorkspaceSwitchEvents([])
           );
@@ -1981,7 +1983,7 @@ export default function App() {
         if (requested.has("system")) {
           queue<EventsResponse>(
             "system",
-            `/v1/events?bucket=system&${query}`,
+            `${apiBase}/events?bucket=system&${query}`,
             (value) => setSystemEvents(Array.isArray(value.events) ? value.events : []),
             () => setSystemEvents([])
           );
@@ -1989,7 +1991,7 @@ export default function App() {
         if (requested.has("browser_tabs")) {
           queue<EventsResponse>(
             "browser_tabs",
-            `/v1/events?bucket=browser_tabs&${query}`,
+            `${apiBase}/events?bucket=browser_tabs&${query}`,
             (value) => setTabsEvents(Array.isArray(value.events) ? value.events : []),
             () => setTabsEvents([])
           );
@@ -1997,7 +1999,7 @@ export default function App() {
         if (requested.has("window_visible")) {
           queue<EventsResponse>(
             "window_visible",
-            `/v1/events?bucket=window_visible&${query}`,
+            `${apiBase}/events?bucket=window_visible&${query}`,
             (value) => setVisibleEvents(Array.isArray(value.events) ? value.events : []),
             () => setVisibleEvents([])
           );
@@ -2026,7 +2028,7 @@ export default function App() {
       cancelled = true;
       if (timer != null) window.clearInterval(timer);
     };
-  }, [page, topic, range, dayWindowMode, reloadKey, autotagRunId]);
+  }, [page, topic, range, dayWindowMode, reloadKey, autotagRunId, apiBase]);
 
   useEffect(() => {
     const runId = String(autotagGenerated?.run_id || "");
@@ -2866,7 +2868,8 @@ export default function App() {
 
       let count = asNumber(e?.data?.count);
       if (count <= 0 && Array.isArray(e?.data?.tabs)) count = e.data.tabs.length;
-      if (count <= 0) continue;
+      if (!Number.isFinite(count)) continue;
+      count = Math.max(0, count);
 
       const s = Math.max(fromMs, start);
       const t = Math.min(toMs, end);
@@ -3063,7 +3066,7 @@ export default function App() {
     setAutotagApproveNote("");
     try {
       const allowedCategoryDropIds = parseIdList(autotagAllowedDropIds);
-      const value = await postJson<AutotagApproveResponse>("/v1/autotag/review-gate/approve", {
+      const value = await postJson<AutotagApproveResponse>(`${apiBase}/autotag/review-gate/approve`, {
         run_id: runId,
         approved_by: approvedBy,
         allowed_category_drop_ids: allowedCategoryDropIds
@@ -3073,7 +3076,7 @@ export default function App() {
         approvedAt ? `Run approved: ${fmtTs(approvedAt)}.` : "Run approved."
       );
 
-      const generatedUrl = `/v1/autotag/generated?run_id=${encodeURIComponent(runId)}`;
+      const generatedUrl = `${apiBase}/autotag/generated?run_id=${encodeURIComponent(runId)}`;
       const generatedValue = await fetchJson<AutotagGeneratedResponse>(generatedUrl);
       setAutotagGenerated(generatedValue);
       setAutotagAllowedDropIds(

@@ -52,7 +52,14 @@ def scan(
 ) -> None:
     from_dt, to_dt = resolve_range(from_spec=from_spec, to_spec=to_spec)
     with run_lock(force_unlock=force_unlock) as lockfile:
-        root = create_run(run_id)
+        try:
+            root = create_run(run_id)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+        except FileExistsError as e:
+            rid = str(run_id or "").strip()
+            detail = f"run already exists: {rid}" if rid else "run already exists"
+            raise typer.BadParameter(detail) from e
         set_lock_run_id(lockfile, root.name)
         metadata = run_scan(
             run_root=root,
@@ -88,7 +95,12 @@ def suggest(
     force_unlock: bool = typer.Option(False, "--force-unlock"),
 ) -> None:
     with run_lock(force_unlock=force_unlock) as lockfile:
-        root = resolve_run_root(run_id)
+        try:
+            root = resolve_run_root(run_id)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+        except FileNotFoundError as e:
+            raise typer.BadParameter(str(e)) from e
         set_lock_run_id(lockfile, root.name)
         metadata = _run_metadata(root)
         categories_path = Path(
@@ -122,7 +134,12 @@ def evaluate(
     force_unlock: bool = typer.Option(False, "--force-unlock"),
 ) -> None:
     with run_lock(force_unlock=force_unlock) as lockfile:
-        root = resolve_run_root(run_id)
+        try:
+            root = resolve_run_root(run_id)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+        except FileNotFoundError as e:
+            raise typer.BadParameter(str(e)) from e
         set_lock_run_id(lockfile, root.name)
         result = run_evaluate(
             run_root=root, allow_missing_goldset=allow_missing_goldset
@@ -147,7 +164,12 @@ def apply(
         raise typer.BadParameter('confirmation token must be exactly "APPLY"')
 
     with run_lock(force_unlock=force_unlock) as lockfile:
-        root = resolve_run_root(run_id)
+        try:
+            root = resolve_run_root(run_id)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+        except FileNotFoundError as e:
+            raise typer.BadParameter(str(e)) from e
         set_lock_run_id(lockfile, root.name)
         metadata = _run_metadata(root)
         target = categories_path or Path(

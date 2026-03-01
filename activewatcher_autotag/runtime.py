@@ -295,13 +295,14 @@ def run_lock(*, force_unlock: bool = False):
                 lock_data = {}
 
             lock_pid = _lock_pid(lock_data)
+            invalid_pid = lock_pid <= 0
             alive = _process_alive(lock_pid)
             age_minutes = _lock_age_minutes(lock_data, now=now)
             stale = (not alive) and age_minutes > float(
                 RUNTIME_DEFAULTS.lock_stale_after_minutes
             )
 
-            if force_unlock or stale:
+            if force_unlock or stale or invalid_pid:
                 with suppress(Exception):
                     lockfile.unlink(missing_ok=True)
                 continue

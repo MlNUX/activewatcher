@@ -28,6 +28,18 @@ class ValidateLocalBaseUrlTests(unittest.TestCase):
             "unix:///var/run/ollama.sock",
         )
 
+    def test_accepts_http_unix_encoded_with_api_path(self) -> None:
+        self.assertEqual(
+            validate_local_base_url("http+unix://%2Fvar%2Frun%2Follama.sock/api"),
+            "unix:///var/run/ollama.sock",
+        )
+
+    def test_accepts_http_unix_partially_encoded_socket_path(self) -> None:
+        self.assertEqual(
+            validate_local_base_url("http+unix://%2Fvar%2Frun/ollama.sock"),
+            "unix:///var/run/ollama.sock",
+        )
+
     def test_rejects_relative_unix_path(self) -> None:
         with self.assertRaises(LlmError):
             validate_local_base_url("unix://relative.sock")
