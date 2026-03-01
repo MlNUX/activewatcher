@@ -165,6 +165,10 @@ def create_app(db_path: str | Path) -> FastAPI:
     def ui_timers():
         return _ui_response()
 
+    @app.get("/ui/settings")
+    def ui_settings():
+        return _ui_response()
+
     @app.get("/ui/favicon.svg")
     def ui_favicon():
         icon_path = frontend_dist / "favicon.svg"

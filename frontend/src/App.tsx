@@ -1,11 +1,13 @@
 import { Fragment, type MouseEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { SettingsPage } from "./SettingsPage";
 import { TimersPage } from "./TimersPage";
+import { useThemeMode } from "./useThemeMode";
 
 type RangeKey = "24h" | "1w" | "1m" | "all";
 type DayWindowMode = "rolling" | "midnight";
-type PageId = "dashboard" | "stats" | "timers";
+type PageId = "dashboard" | "stats" | "timers" | "settings";
 type TopicId =
   | "all"
   | "overview"
@@ -304,7 +306,7 @@ const MONITOR_SETUP_FILTERS: Array<{ key: MonitorSetupFilter; label: string }> =
 ];
 
 function requestedLoadKeys(page: PageId, topic: TopicId): Set<LoadKey> {
-  if (page === "timers") {
+  if (page === "timers" || page === "settings") {
     return new Set<LoadKey>();
   }
 
@@ -375,6 +377,7 @@ function parsePageId(pathname: string): PageId {
   const p = String(pathname || "").replace(/\/+$/, "");
   if (p.endsWith("/ui/stats")) return "stats";
   if (p.endsWith("/ui/timers")) return "timers";
+  if (p.endsWith("/ui/settings")) return "settings";
   return "dashboard";
 }
 
@@ -1780,6 +1783,7 @@ export default function App() {
   const [dayWindowMode, setDayWindowMode] = useState<DayWindowMode>(initialDayWindowMode);
   const [monitorSetupFilter, setMonitorSetupFilter] = useState<MonitorSetupFilter>("all");
   const [reloadKey, setReloadKey] = useState(0);
+  const [themeMode, onThemeModeChange] = useThemeMode();
 
   function replaceQuery(nextRange: RangeKey, nextTopic: TopicId, nextDayWindowMode: DayWindowMode): void {
     const params = new URLSearchParams(String(window.location.search || ""));
@@ -1816,7 +1820,8 @@ export default function App() {
     const qs = params.toString();
     if (target === "dashboard") return `${uiBase}${qs ? `?${qs}` : ""}`;
     if (target === "stats") return `${uiBase}/stats${qs ? `?${qs}` : ""}`;
-    return `${uiBase}/timers${qs ? `?${qs}` : ""}`;
+    if (target === "timers") return `${uiBase}/timers${qs ? `?${qs}` : ""}`;
+    return `${uiBase}/settings${qs ? `?${qs}` : ""}`;
   }
 
   const [windowRange, setWindowRange] = useState<TimeWindow | null>(null);
@@ -1852,7 +1857,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (page === "timers") {
+    if (page === "timers" || page === "settings") {
       setLoading(false);
       setError("");
       return;
@@ -3112,7 +3117,7 @@ export default function App() {
   }
 
   const showTopic = (id: TopicId): boolean => {
-    if (page === "timers") {
+    if (page === "timers" || page === "settings") {
       return false;
     }
     if (page === "dashboard") {
@@ -3232,8 +3237,8 @@ export default function App() {
     </section>
   );
 
-  const statusTone = error ? "isError" : loading ? "isLoading" : "isOk";
-  const statusBadge = loading ? "syncing" : error ? "degraded" : "healthy";
+  const statusTone = page === "settings" ? "isOk" : error ? "isError" : loading ? "isLoading" : "isOk";
+  const statusBadge = page === "settings" ? "settings" : loading ? "syncing" : error ? "degraded" : "healthy";
   const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
   const showTodayNowMarker = page === "dashboard" && range === "24h" && effectiveDayWindowMode === "midnight";
   const rangeLabel =
@@ -3261,11 +3266,16 @@ export default function App() {
               <a href={hrefFor("timers")} className={page === "timers" ? "pill active" : "pill"}>
                 timers
               </a>
+              <a href={hrefFor("settings")} className={page === "settings" ? "pill active" : "pill"}>
+                settings
+              </a>
             </div>
           </div>
           <div className="sub">
             {page === "timers"
               ? "named timers + counters with start/pause/stop"
+              : page === "settings"
+                ? "appearance preferences"
               : windowRange
                 ? `range: ${rangeLabel} · ${fmtTs(windowRange.from)} → ${fmtTs(windowRange.to)}`
                 : `range: ${rangeLabel}`}
@@ -3274,7 +3284,7 @@ export default function App() {
 
         <div>
           <div className="controls">
-            {page !== "timers"
+            {page === "dashboard" || page === "stats"
               ? RANGES.map((r) => (
                   <button key={r.key} className={r.key === range ? "pill active" : "pill"} onClick={() => onRangeChange(r.key)}>
                     {page === "dashboard" && r.key === "24h" ? "heute" : r.label}
@@ -3322,6 +3332,8 @@ export default function App() {
           <span>
             {page === "timers"
               ? "timer controls are local + persisted in sqlite"
+              : page === "settings"
+                ? "settings are stored in your browser"
               : updatedAt
                 ? `updated ${updatedAt}`
                 : loading
@@ -3331,6 +3343,8 @@ export default function App() {
           <span className={error ? "statusIssue" : "statusHealthy"}>
             {page === "timers"
               ? "timer controls available"
+              : page === "settings"
+                ? "ready to configure"
               : error
                 ? `partial errors: ${error}`
                 : "all requested data sources reachable"}
@@ -3339,6 +3353,7 @@ export default function App() {
       </section>
 
       {page === "timers" ? <TimersPage apiBase={apiBase} /> : null}
+      {page === "settings" ? <SettingsPage themeMode={themeMode} onThemeModeChange={onThemeModeChange} /> : null}
 
       {showTopic("overview") ? (
         <section className="card">

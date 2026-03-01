@@ -60,12 +60,18 @@ After changing this, restart the Hyprland watcher.
 
 ## Timers View
 
-The UI now includes a third top-level tab: `timers`.
+The UI includes top-level tabs: `dashboard`, `stats`, `timers`, `settings`.
 
 - Create named entries as either `timer` (countdown) or `counter` (count up).
-- Controls per entry: `start`, `pause`, `stop`.
-- `stop` resets both timer and counter.
+- Timer controls use `start work` / `start break` and `work done`.
+- Counter controls use `start`, `pause`, and `stop`.
+- Entries that were never started can be deleted directly from the active list.
 - State is persisted in the local SQLite database.
+
+## Settings View
+
+- `white mode` toggle switches between dark and light themes.
+- Theme preference is saved in browser local storage (`aw.ui.theme`).
 
 ## Browser Plugin
 

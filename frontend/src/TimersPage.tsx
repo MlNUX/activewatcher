@@ -339,6 +339,7 @@ export function TimersPage({ apiBase }: { apiBase: string }) {
               const secondaryAction: TimerAction = neverStarted ? "delete" : "stop";
               const secondaryLabel = neverStarted ? "delete" : stopLabel;
               const secondaryClassName = neverStarted ? "pill timersCtlDanger" : "pill timersCtlGhost";
+              const itemLabel = isTimer ? "timer" : "counter";
               const dialAriaLabel = isCounter
                 ? `${row.name}: counter ${stateLabel}, ${displayValue}`
                 : `${row.name}: ${Math.round(progress * 100)} percent complete`;
@@ -412,9 +413,9 @@ export function TimersPage({ apiBase }: { apiBase: string }) {
                         type="button"
                         className="pill timersCtlDanger"
                         onClick={() => {
-                          if (!window.confirm(`Delete timer \"${row.name}\" from history?`)) return;
+                          if (!window.confirm(`Delete ${itemLabel} \"${row.name}\" from history?`)) return;
                           void runAction(row.id, "delete", {
-                            successNote: `deleted timer: ${row.name}`
+                            successNote: `deleted ${itemLabel}: ${row.name}`
                           });
                         }}
                         disabled={busy || createPending}
@@ -437,9 +438,9 @@ export function TimersPage({ apiBase }: { apiBase: string }) {
                         className={secondaryClassName}
                         onClick={() => {
                           if (secondaryAction === "delete") {
-                            if (!window.confirm(`Delete timer \"${row.name}\"?`)) return;
+                            if (!window.confirm(`Delete ${itemLabel} \"${row.name}\"?`)) return;
                             void runAction(row.id, "delete", {
-                              successNote: `deleted timer: ${row.name}`
+                              successNote: `deleted ${itemLabel}: ${row.name}`
                             });
                             return;
                           }
