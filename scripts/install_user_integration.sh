@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR_SYSTEMD="${ROOT_DIR//\\/\\\\}"
+ROOT_DIR_SYSTEMD="${ROOT_DIR_SYSTEMD//\"/\\\"}"
 SERVICE_NAME="activewatcher-backend.service"
 DESKTOP_NAME="activewatcher-frontend.desktop"
 
@@ -23,8 +25,8 @@ After=default.target
 
 [Service]
 Type=simple
-WorkingDirectory=${ROOT_DIR}
-ExecStart=${ROOT_DIR}/scripts/run_backend_server.sh
+WorkingDirectory="${ROOT_DIR_SYSTEMD}"
+ExecStart="${ROOT_DIR_SYSTEMD}/scripts/run_backend_server.sh"
 Restart=always
 RestartSec=3
 

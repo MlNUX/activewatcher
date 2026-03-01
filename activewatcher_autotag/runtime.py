@@ -5,6 +5,7 @@ import os
 import re
 import socket
 import uuid
+from contextlib import suppress
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,7 @@ from activewatcher.common.time import parse_rfc3339, to_rfc3339, to_utc, utcnow
 from .settings import RUNTIME_DEFAULTS
 
 _DURATION_RE = re.compile(r"^(?P<value>\d+)(?P<unit>[smhdw])$", re.IGNORECASE)
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 @dataclass(frozen=True)
@@ -119,12 +121,25 @@ def new_run_id(now: datetime | None = None) -> str:
     return f"run_{ts}_{uuid.uuid4().hex[:8]}"
 
 
+def normalize_run_id(run_id: str) -> str:
+    rid = str(run_id or "").strip()
+    if not rid:
+        raise ValueError("run_id is required")
+    if "/" in rid or "\\" in rid:
+        raise ValueError(f"invalid run_id: {run_id}")
+    if rid in {".", ".."}:
+        raise ValueError(f"invalid run_id: {run_id}")
+    if not _RUN_ID_RE.fullmatch(rid):
+        raise ValueError(f"invalid run_id: {run_id}")
+    return rid
+
+
 def run_root(run_id: str) -> Path:
-    return ensure_autotag_dirs().runs / str(run_id)
+    return ensure_autotag_dirs().runs / normalize_run_id(run_id)
 
 
 def create_run(run_id: str | None = None) -> Path:
-    rid = run_id or new_run_id()
+    rid = normalize_run_id(run_id) if run_id else new_run_id()
     path = run_root(rid)
     path.mkdir(parents=True, exist_ok=False)
     return path
@@ -148,11 +163,22 @@ def resolve_run_root(run_id: str | None) -> Path:
     return latest_run_root()
 
 
-def write_json(path: Path, payload: Any) -> None:
+def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        with suppress(FileNotFoundError):
+            tmp.unlink()
+
+
+def write_json(path: Path, payload: Any) -> None:
+    _atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
 def read_json(path: Path) -> Any:
@@ -161,10 +187,18 @@ def read_json(path: Path) -> Any:
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
-            f.write("\n")
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            for row in rows:
+                f.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+                f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        with suppress(FileNotFoundError):
+            tmp.unlink()
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -203,6 +237,25 @@ def _process_alive(pid: int) -> bool:
         return True
 
 
+def _lock_pid(lock: dict[str, Any]) -> int:
+    value = lock.get("pid")
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return 0
+        try:
+            return int(s)
+        except ValueError:
+            return 0
+    return 0
+
+
 def _lock_age_minutes(lock: dict[str, Any], *, now: datetime) -> float:
     started_raw = str(lock.get("started_at") or "").strip()
     if not started_raw:
@@ -218,49 +271,59 @@ def _lock_age_minutes(lock: dict[str, Any], *, now: datetime) -> float:
 def run_lock(*, force_unlock: bool = False):
     dirs = ensure_autotag_dirs()
     lockfile = dirs.lockfile
-    now = now_utc()
+    created = False
 
-    if lockfile.exists():
-        lock_data: dict[str, Any] = {}
+    while not created:
+        now = now_utc()
+        current_lock = {
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+            "started_at": to_rfc3339(now),
+            "run_id": "pending",
+        }
+        payload = json.dumps(current_lock, indent=2, ensure_ascii=False) + "\n"
+
         try:
-            value = read_json(lockfile)
-            if isinstance(value, dict):
-                lock_data = value
-        except Exception:
-            lock_data = {}
-
-        lock_pid = int(lock_data.get("pid") or 0)
-        alive = _process_alive(lock_pid)
-        age_minutes = _lock_age_minutes(lock_data, now=now)
-        stale = (not alive) and age_minutes > float(
-            RUNTIME_DEFAULTS.lock_stale_after_minutes
-        )
-
-        if force_unlock or stale:
+            fd = os.open(lockfile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            lock_data: dict[str, Any] = {}
             try:
-                lockfile.unlink(missing_ok=True)
+                value = read_json(lockfile)
+                if isinstance(value, dict):
+                    lock_data = value
             except Exception:
-                pass
-        else:
+                lock_data = {}
+
+            lock_pid = _lock_pid(lock_data)
+            alive = _process_alive(lock_pid)
+            age_minutes = _lock_age_minutes(lock_data, now=now)
+            stale = (not alive) and age_minutes > float(
+                RUNTIME_DEFAULTS.lock_stale_after_minutes
+            )
+
+            if force_unlock or stale:
+                with suppress(Exception):
+                    lockfile.unlink(missing_ok=True)
+                continue
+
             lock_run_id = str(lock_data.get("run_id") or "unknown")
             lock_host = str(lock_data.get("host") or "unknown")
             raise RuntimeError(
                 f"autotag lock active (pid={lock_pid} host={lock_host} run_id={lock_run_id}); use --force-unlock to override"
             )
+        else:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            created = True
 
-    current_lock = {
-        "pid": os.getpid(),
-        "host": socket.gethostname(),
-        "started_at": to_rfc3339(now),
-        "run_id": "pending",
-    }
-    write_json(lockfile, current_lock)
     try:
         yield lockfile
     finally:
         try:
             raw = read_json(lockfile)
-            if isinstance(raw, dict) and int(raw.get("pid") or 0) == os.getpid():
+            if isinstance(raw, dict) and _lock_pid(raw) == os.getpid():
                 lockfile.unlink(missing_ok=True)
         except Exception:
             pass
@@ -271,7 +334,7 @@ def set_lock_run_id(lockfile: Path, run_id: str) -> None:
         "pid": os.getpid(),
         "host": socket.gethostname(),
         "started_at": to_rfc3339(now_utc()),
-        "run_id": run_id,
+        "run_id": normalize_run_id(run_id),
     }
     write_json(lockfile, payload)
 

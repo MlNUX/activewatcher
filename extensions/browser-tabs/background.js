@@ -7,7 +7,7 @@ const DEFAULTS = {
 };
 
 let sendTimer = null;
-let lastPayload = "";
+let lastPayloadKey = "";
 
 const ALLOWED_SERVER_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 const ALLOWED_SERVER_PORT = "8712";
@@ -69,11 +69,29 @@ async function getSettings() {
 }
 
 function detectBrowserLabel() {
+  const brands = navigator.userAgentData?.brands;
+  if (Array.isArray(brands)) {
+    const normalized = brands.map((row) => String(row?.brand || "").toLowerCase());
+    if (normalized.some((b) => b.includes("firefox"))) return "firefox";
+    if (normalized.some((b) => b.includes("brave"))) return "brave";
+    if (normalized.some((b) => b.includes("chrome") || b.includes("chromium"))) return "chrome";
+  }
+
   const ua = String(navigator.userAgent || "").toLowerCase();
   if (ua.includes("firefox")) return "firefox";
   if (ua.includes("brave")) return "brave";
   if (ua.includes("chrome")) return "chrome";
   return "browser";
+}
+
+function dedupeKey(payload, nowMs) {
+  const minuteBucket = Math.floor((Number(nowMs) || Date.now()) / 60000);
+  return JSON.stringify({
+    bucket: payload?.bucket || "",
+    source: payload?.source || "",
+    data: payload?.data || {},
+    minute: minuteBucket
+  });
 }
 
 async function collectTabsSnapshot() {
@@ -149,7 +167,8 @@ async function postState() {
   };
 
   const body = JSON.stringify(payload);
-  if (body === lastPayload) return;
+  const key = dedupeKey(payload, Date.now());
+  if (key === lastPayloadKey) return;
 
   try {
     const response = await fetch(`${serverUrl}/v1/state`, {
@@ -158,7 +177,7 @@ async function postState() {
       body,
     });
     if (response.ok) {
-      lastPayload = body;
+      lastPayloadKey = key;
     }
   } catch {
     // ignore network errors
