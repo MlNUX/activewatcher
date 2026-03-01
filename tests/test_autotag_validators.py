@@ -5,6 +5,7 @@ import unittest
 from activewatcher_autotag.validators import (
     coerce_pass_a_payload,
     coerce_pass_b_payload,
+    validate_pass_b_proposals,
 )
 
 
@@ -36,8 +37,11 @@ class CoercePassAPayloadTests(unittest.TestCase):
         )
 
         self.assertEqual(coerced.get("version"), "autotag.classify.v1")
-        items = coerced.get("items")
-        self.assertIsInstance(items, list)
+        items_raw = coerced.get("items")
+        if not isinstance(items_raw, list):
+            self.fail("items must be a list")
+            return
+        items = items_raw
         self.assertEqual(len(items), 1)
         row = items[0]
         self.assertEqual(row.get("target_category_id"), "coding")
@@ -98,8 +102,11 @@ class CoercePassBPayloadTests(unittest.TestCase):
         )
 
         self.assertEqual(coerced.get("version"), "autotag.propose.v1")
-        proposals = coerced.get("proposals")
-        self.assertIsInstance(proposals, list)
+        proposals_raw = coerced.get("proposals")
+        if not isinstance(proposals_raw, list):
+            self.fail("proposals must be a list")
+            return
+        proposals = proposals_raw
         self.assertEqual(len(proposals), 1)
 
         proposal = proposals[0]
@@ -114,6 +121,119 @@ class CoercePassBPayloadTests(unittest.TestCase):
         self.assertIsInstance(rule_tokens, dict)
         self.assertEqual(rule_tokens.get("apps"), ["kitty"])
         self.assertEqual(rule_tokens.get("domains"), ["kit.edu"])
+
+    def test_coerce_pass_b_uses_profile_coverage_not_model_coverage(self) -> None:
+        batch_profiles = [
+            {
+                "entity_id": "app:kitty",
+                "entity_type": "app",
+                "entity": "kitty",
+                "seconds": 1000,
+                "active_days": 2,
+            },
+            {
+                "entity_id": "domain:kit.edu",
+                "entity_type": "domain",
+                "entity": "kit.edu",
+                "seconds": 2000,
+                "active_days": 3,
+            },
+        ]
+        payload = {
+            "proposals": [
+                {
+                    "id": "education",
+                    "label": "Education",
+                    "apps": ["kitty"],
+                    "domains": ["kit.edu"],
+                    "coverage": {
+                        "unique_apps": 1,
+                        "unique_domains": 1,
+                        "combined": 2,
+                        "total_seconds": 999999,
+                        "active_days": 999,
+                    },
+                }
+            ]
+        }
+
+        coerced = coerce_pass_b_payload(
+            payload=payload,
+            batch_profiles=batch_profiles,
+            enable_title_regex=False,
+        )
+        proposals = coerced.get("proposals")
+        if not isinstance(proposals, list):
+            self.fail("proposals must be a list")
+            return
+        self.assertEqual(len(proposals), 1)
+        proposal = proposals[0]
+        coverage = proposal.get("coverage")
+        self.assertIsInstance(coverage, dict)
+        self.assertEqual(coverage.get("total_seconds"), 3000.0)
+        self.assertEqual(coverage.get("active_days"), 3)
+
+
+class ValidatePassBProposalsTests(unittest.TestCase):
+    def test_rejects_duplicate_proposal_ids(self) -> None:
+        proposals = [
+            {
+                "id": "learning",
+                "label": "Learning",
+                "members": [
+                    {
+                        "entity_id": "app:one",
+                        "entity_type": "app",
+                        "entity": "one",
+                        "confidence": 0.8,
+                    }
+                ],
+                "coverage": {
+                    "unique_apps": 1,
+                    "unique_domains": 0,
+                    "combined": 1,
+                    "total_seconds": 10,
+                    "active_days": 1,
+                },
+                "cohesion_score": 0.8,
+                "rule_tokens": {},
+            },
+            {
+                "id": "learning",
+                "label": "Learning 2",
+                "members": [
+                    {
+                        "entity_id": "app:two",
+                        "entity_type": "app",
+                        "entity": "two",
+                        "confidence": 0.8,
+                    }
+                ],
+                "coverage": {
+                    "unique_apps": 1,
+                    "unique_domains": 0,
+                    "combined": 1,
+                    "total_seconds": 10,
+                    "active_days": 1,
+                },
+                "cohesion_score": 0.8,
+                "rule_tokens": {},
+            },
+        ]
+
+        _accepted, rejected = validate_pass_b_proposals(
+            proposals=proposals,
+            existing_categories=[
+                {"id": "other", "apps": [], "domains": [], "titles": [], "urls": []}
+            ],
+            pass_a_decisions=[],
+            enable_title_regex=False,
+        )
+
+        reasons = {
+            str(row.get("reason") or "") for row in rejected if isinstance(row, dict)
+        }
+        self.assertIn("duplicate proposal id", reasons)
 
 
 if __name__ == "__main__":

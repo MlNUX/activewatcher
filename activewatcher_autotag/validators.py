@@ -319,11 +319,8 @@ def coerce_pass_b_payload(
             except Exception:
                 pass
 
-        coverage_raw = (
-            raw.get("coverage") if isinstance(raw.get("coverage"), dict) else {}
-        )
-        total_seconds = float(coverage_raw.get("total_seconds") or profile_seconds)
-        active_days = int(coverage_raw.get("active_days") or profile_days)
+        total_seconds = max(0.0, profile_seconds)
+        active_days = max(0, profile_days)
 
         nearest_raw = (
             raw.get("nearest_existing")
@@ -530,6 +527,7 @@ def validate_pass_b_proposals(
 
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
+    seen_proposal_ids: set[str] = set()
 
     for raw in proposals:
         if not isinstance(raw, dict):
@@ -542,6 +540,10 @@ def validate_pass_b_proposals(
                 {"id": proposal_id or "<empty>", "reason": "invalid proposal id"}
             )
             continue
+        if proposal_id in seen_proposal_ids:
+            rejected.append({"id": proposal_id, "reason": "duplicate proposal id"})
+            continue
+        seen_proposal_ids.add(proposal_id)
 
         members_raw = raw.get("members")
         if not isinstance(members_raw, list) or not members_raw:

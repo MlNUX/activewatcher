@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha256
@@ -13,6 +16,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from activewatcher.common.categories import CategoryCatalog, category_catalog
 from activewatcher.common.config import default_stale_after_seconds, xdg_data_home
 from activewatcher.common.time import parse_rfc3339, to_rfc3339, to_utc, utcnow
+
+
+_AUTOTAG_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 @dataclass(frozen=True)
@@ -786,10 +792,12 @@ def _tabs_category_details(
         if dur <= 0:
             continue
         browser = str(it.data.get("browser") or it.source or "browser")
+        tab_rows = [tab for tab in tabs if isinstance(tab, dict)]
+        if not tab_rows:
+            continue
+        weighted_dur = dur / float(len(tab_rows))
 
-        for tab in tabs:
-            if not isinstance(tab, dict):
-                continue
+        for tab in tab_rows:
             url = str(
                 tab.get("url") or tab.get("pending_url") or tab.get("pendingUrl") or ""
             )
@@ -798,14 +806,14 @@ def _tabs_category_details(
             domain = _tab_domain_from_url(url)
 
             _add_cat_named_seconds(
-                domains_by_cat, category=cat, name=domain, seconds=dur
+                domains_by_cat, category=cat, name=domain, seconds=weighted_dur
             )
             _add_cat_named_seconds(
-                browsers_by_cat, category=cat, name=browser, seconds=dur
+                browsers_by_cat, category=cat, name=browser, seconds=weighted_dur
             )
             if title:
                 _add_cat_named_seconds(
-                    titles_by_cat, category=cat, name=title, seconds=dur
+                    titles_by_cat, category=cat, name=title, seconds=weighted_dur
                 )
 
     out: dict[str, dict[str, Any]] = {}
@@ -902,13 +910,15 @@ def _tabs_category_totals(
         dur = it.duration_seconds()
         if dur <= 0:
             continue
-        for t in tabs:
-            if not isinstance(t, dict):
-                continue
+        tab_rows = [tab for tab in tabs if isinstance(tab, dict)]
+        if not tab_rows:
+            continue
+        weighted_dur = dur / float(len(tab_rows))
+        for t in tab_rows:
             url = str(t.get("url") or t.get("pending_url") or t.get("pendingUrl") or "")
             title = str(t.get("title") or "")
             cat = catalog.classify_tab(url=url, title=title, app=browser)
-            _add_cat_seconds(totals, cat, dur)
+            _add_cat_seconds(totals, cat, weighted_dur)
     return totals
 
 
@@ -1001,6 +1011,22 @@ def _read_json_file(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _write_json_file_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def _read_jsonl_file(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
@@ -1030,13 +1056,22 @@ def _file_sha256(path: Path) -> str:
 
 
 def _select_autotag_run_root(*, run_id: str | None, limit: int = 500) -> Path | None:
-    roots = _autotag_run_roots(limit=limit)
     if run_id:
-        wanted = str(run_id)
-        for root in roots:
-            if root.name == wanted:
-                return root
+        wanted = str(run_id or "").strip()
+        if (
+            not wanted
+            or wanted in {".", ".."}
+            or "/" in wanted
+            or "\\" in wanted
+            or not _AUTOTAG_RUN_ID_RE.fullmatch(wanted)
+        ):
+            raise ValueError(f"invalid run_id: {run_id}")
+        root = _autotag_runs_dir() / wanted
+        if root.is_dir():
+            return root
         raise FileNotFoundError(f"autotag run not found: {run_id}")
+
+    roots = _autotag_run_roots(limit=limit)
     if roots:
         return roots[0]
     return None
@@ -1062,10 +1097,11 @@ def _review_gate_payload_from_source(
     payload: dict[str, Any],
     source: str,
 ) -> dict[str, Any]:
+    approved = payload.get("approved") is True
     return {
         "source": source,
         "run_id": str(payload.get("run_id") or root.name),
-        "approved": bool(payload.get("approved") or False),
+        "approved": approved,
         "approved_by": str(payload.get("approved_by") or ""),
         "approved_at": str(payload.get("approved_at") or ""),
         "categories_generated_sha256": str(
@@ -1234,10 +1270,7 @@ def approve_autotag_review_gate(
             allowed_category_drop_ids
         ),
     }
-    (selected / "review-gate.json").write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    _write_json_file_atomic(selected / "review-gate.json", payload)
     return {
         "run_id": selected.name,
         "review_gate": _review_gate_payload_from_source(

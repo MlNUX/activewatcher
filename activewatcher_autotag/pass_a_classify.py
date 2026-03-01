@@ -12,6 +12,7 @@ from .llm_client import (
     safe_json_dump,
 )
 from .runtime import prompts_dir, read_json, read_jsonl, schemas_dir, write_jsonl
+from .settings import THRESHOLDS
 from .validators import (
     coerce_pass_a_payload,
     normalize_pass_a,
@@ -133,7 +134,9 @@ def run_pass_a(
         }
 
         prompt_values = {
-            "MIN_CONFIDENCE_AUTO_ACCEPT": "0.78",
+            "MIN_CONFIDENCE_AUTO_ACCEPT": str(
+                THRESHOLDS.classify_auto_accept_min_confidence
+            ),
             "ENABLE_TITLE_REGEX": "true" if enable_title_regex else "false",
             "EXISTING_CATEGORIES_JSON": safe_json_dump(existing_context),
             "ENTITY_PROFILES_JSON": safe_json_dump(batch),

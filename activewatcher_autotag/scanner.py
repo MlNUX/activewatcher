@@ -114,8 +114,9 @@ def _add_seconds_by_local_day(
     start: datetime,
     end: datetime,
     tz: timezone | ZoneInfo,
+    weight: float = 1.0,
 ) -> None:
-    if end <= start:
+    if end <= start or weight <= 0:
         return
     cur = start.astimezone(tz)
     end_local = end.astimezone(tz)
@@ -123,9 +124,13 @@ def _add_seconds_by_local_day(
         d = cur.date()
         next_midnight = datetime.combine(d + timedelta(days=1), time.min, tzinfo=tz)
         if next_midnight >= end_local:
-            out[d] = out.get(d, 0.0) + max(0.0, (end_local - cur).total_seconds())
+            out[d] = out.get(d, 0.0) + (
+                max(0.0, (end_local - cur).total_seconds()) * weight
+            )
             return
-        out[d] = out.get(d, 0.0) + max(0.0, (next_midnight - cur).total_seconds())
+        out[d] = out.get(d, 0.0) + (
+            max(0.0, (next_midnight - cur).total_seconds()) * weight
+        )
         cur = next_midnight
 
 
@@ -211,10 +216,13 @@ def build_profiles(
             continue
         browser = _normalize_app(str(it.data.get("browser") or it.source or "browser"))
         domains_in_event: set[str] = set()
+        tab_rows = [tab for tab in tabs if isinstance(tab, dict)]
+        if not tab_rows:
+            continue
+        weighted_sec = sec / float(len(tab_rows))
+        weight_per_tab = 1.0 / float(len(tab_rows))
 
-        for tab in tabs:
-            if not isinstance(tab, dict):
-                continue
+        for tab in tab_rows:
             raw_url = str(
                 tab.get("url") or tab.get("pending_url") or tab.get("pendingUrl") or ""
             )
@@ -222,17 +230,23 @@ def build_profiles(
             if not domain:
                 continue
             title = truncate_title(str(tab.get("title") or ""), max_len=80)
-            domain_seconds[domain] += sec
+            domain_seconds[domain] += weighted_sec
             domain_occurrences[domain] += 1
-            domain_apps[domain][browser] += sec
+            domain_apps[domain][browser] += weighted_sec
             if title:
-                domain_titles[domain][title] += sec
+                domain_titles[domain][title] += weighted_sec
             day_map = domain_days[domain]
-            _add_seconds_by_local_day(day_map, start=it.start, end=it.end, tz=tz)
+            _add_seconds_by_local_day(
+                day_map,
+                start=it.start,
+                end=it.end,
+                tz=tz,
+                weight=weight_per_tab,
+            )
 
             domains_in_event.add(domain)
             if browser:
-                app_domains[browser][domain] += sec
+                app_domains[browser][domain] += weighted_sec
 
         if len(domains_in_event) > 1:
             limited = sorted(domains_in_event)[:40]

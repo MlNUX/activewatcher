@@ -190,15 +190,17 @@ def _category_totals(
         dur = it.duration_seconds()
         if dur <= 0:
             continue
-        for tab in tabs_data:
-            if not isinstance(tab, dict):
-                continue
+        tab_rows = [tab for tab in tabs_data if isinstance(tab, dict)]
+        if not tab_rows:
+            continue
+        weighted_dur = dur / float(len(tab_rows))
+        for tab in tab_rows:
             url = str(
                 tab.get("url") or tab.get("pending_url") or tab.get("pendingUrl") or ""
             )
             title = str(tab.get("title") or "")
             cat = _classify_tab(catalog, url=url, title=title, app=browser)
-            totals[cat] = totals.get(cat, 0.0) + dur
+            totals[cat] = totals.get(cat, 0.0) + weighted_dur
 
     return totals
 

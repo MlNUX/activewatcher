@@ -199,6 +199,21 @@ class AutotagReportsTests(unittest.TestCase):
         self.assertEqual(value.get("decision_count"), 0)
         self.assertEqual(value.get("decisions"), [])
 
+    def test_select_autotag_run_root_by_id_ignores_recency_limit(self) -> None:
+        self._write_run(run_id="run_old", metadata={}, decisions=[], mtime=1)
+        self._write_run(run_id="run_new", metadata={}, decisions=[], mtime=2)
+
+        selected = reports._select_autotag_run_root(run_id="run_old", limit=1)
+        self.assertIsNotNone(selected)
+        if selected is None:
+            self.fail("run should exist")
+            return
+        self.assertEqual(selected.name, "run_old")
+
+    def test_autotag_generated_rejects_invalid_run_id(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid run_id"):
+            reports.autotag_generated(run_id="../evil")
+
     def test_autotag_generated_returns_latest(self) -> None:
         self._write_run(
             run_id="run_old",
@@ -347,6 +362,34 @@ class AutotagReportsTests(unittest.TestCase):
                 approved_by="",
                 allowed_category_drop_ids=None,
             )
+
+    def test_review_gate_string_false_is_not_treated_as_approved(self) -> None:
+        self._write_run(
+            run_id="run_string_false",
+            metadata={"suggest": {}, "evaluate": {}},
+            decisions=[],
+            review_template={
+                "run_id": "run_string_false",
+                "approved": "false",
+                "approved_by": "",
+                "approved_at": "",
+                "categories_generated_sha256": "x",
+                "allowed_category_drop_ids": [],
+            },
+            mtime=5,
+        )
+
+        value = reports.list_autotag_runs(limit=20)
+        runs_raw = value.get("runs")
+        self.assertIsInstance(runs_raw, list)
+        runs = runs_raw if isinstance(runs_raw, list) else []
+        rows = [row for row in runs if isinstance(row, dict)]
+        row = next((r for r in rows if r.get("run_id") == "run_string_false"), None)
+        self.assertIsInstance(row, dict)
+        if not isinstance(row, dict):
+            self.fail("run row should exist")
+            return
+        self.assertFalse(bool(row.get("review_gate_approved")))
 
 
 if __name__ == "__main__":
