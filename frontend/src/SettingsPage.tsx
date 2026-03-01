@@ -100,39 +100,64 @@ export function SettingsPage({
     try {
       const buckets = ["window", "idle", "workspace", "workspace_switch", "system", "browser_tabs", "window_visible"];
       const dataByBucket: Record<string, unknown> = {};
+      const bucketErrors: string[] = [];
 
-      for (const bucket of buckets) {
-        const range = await fetchJson<RangeResponse>(`${apiBase}/range?bucket=${encodeURIComponent(bucket)}`);
-        if (range.empty || !range.from_ts || !range.to_ts) {
-          dataByBucket[bucket] = {
-            bucket,
-            empty: true,
-            from_ts: null,
-            to_ts: null,
-            events: []
-          };
-          continue;
-        }
+      await Promise.all(
+        buckets.map(async (bucket) => {
+          try {
+            const range = await fetchJson<RangeResponse>(
+              `${apiBase}/range?bucket=${encodeURIComponent(bucket)}`
+            );
+            if (range.empty || !range.from_ts || !range.to_ts) {
+              dataByBucket[bucket] = {
+                bucket,
+                empty: true,
+                from_ts: null,
+                to_ts: null,
+                events: []
+              };
+              return;
+            }
 
-        const from = encodeURIComponent(range.from_ts);
-        const to = encodeURIComponent(range.to_ts);
-        const events = await fetchJson<EventsResponse>(`${apiBase}/events?bucket=${encodeURIComponent(bucket)}&from=${from}&to=${to}`);
-        dataByBucket[bucket] = {
-          bucket,
-          empty: false,
-          from_ts: events.from_ts || range.from_ts,
-          to_ts: events.to_ts || range.to_ts,
-          event_count: Array.isArray(events.events) ? events.events.length : 0,
-          events: Array.isArray(events.events) ? events.events : []
-        };
-      }
+            const from = encodeURIComponent(range.from_ts);
+            const to = encodeURIComponent(range.to_ts);
+            const events = await fetchJson<EventsResponse>(
+              `${apiBase}/events?bucket=${encodeURIComponent(bucket)}&from=${from}&to=${to}`
+            );
+            dataByBucket[bucket] = {
+              bucket,
+              empty: false,
+              from_ts: events.from_ts || range.from_ts,
+              to_ts: events.to_ts || range.to_ts,
+              event_count: Array.isArray(events.events) ? events.events.length : 0,
+              events: Array.isArray(events.events) ? events.events : []
+            };
+          } catch (e) {
+            const message = String(e);
+            bucketErrors.push(`${bucket}: ${message}`);
+            dataByBucket[bucket] = {
+              bucket,
+              empty: true,
+              from_ts: null,
+              to_ts: null,
+              events: [],
+              error: message
+            };
+          }
+        })
+      );
 
       downloadJson(`activewatcher-data-${fileStamp()}.json`, {
         schema: "activewatcher-data-export/v1",
         exported_at: new Date().toISOString(),
         data: dataByBucket
       });
-      setNote("tracked data exported");
+      if (bucketErrors.length > 0) {
+        setNote("tracked data exported with partial errors");
+        setError(bucketErrors.join(" | "));
+      } else {
+        setNote("tracked data exported");
+      }
     } catch (e) {
       setError(String(e));
     } finally {

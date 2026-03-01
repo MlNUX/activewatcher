@@ -154,6 +154,56 @@ class TimersApiLogicTests(unittest.TestCase):
         with self.assertRaises(timers.TimerNotFoundError):
             timers.delete_timer(self.conn, timer_id=timer_id, now=_utc(12))
 
+    def test_list_timers_persists_finished_state_for_expired_running_timer(
+        self,
+    ) -> None:
+        created = timers.create_timer(
+            self.conn,
+            name="persist me",
+            kind="timer",
+            duration_seconds=5,
+            now=_utc(0),
+        )
+        timer_id = int(created["id"])
+
+        timers.start_timer(self.conn, timer_id=timer_id, now=_utc(0))
+        listed = timers.list_timers(self.conn, now=_utc(9))
+        row = _timer_by_id(listed.get("timers") or [], timer_id)
+        self.assertEqual(row.get("state"), "finished")
+
+        db_row = self.conn.execute(
+            "SELECT state, running_since_ts, elapsed_seconds FROM timers WHERE id = ?",
+            (timer_id,),
+        ).fetchone()
+        self.assertIsNotNone(db_row)
+        self.assertEqual(str(db_row["state"]), "finished")
+        self.assertIsNone(db_row["running_since_ts"])
+        self.assertAlmostEqual(_as_float(db_row["elapsed_seconds"]), 5.0, places=3)
+
+    def test_pause_persists_finished_state_when_timer_already_expired(self) -> None:
+        created = timers.create_timer(
+            self.conn,
+            name="pause finish",
+            kind="timer",
+            duration_seconds=3,
+            now=_utc(0),
+        )
+        timer_id = int(created["id"])
+
+        timers.start_timer(self.conn, timer_id=timer_id, now=_utc(0))
+        paused = timers.pause_timer(self.conn, timer_id=timer_id, now=_utc(8))
+        self.assertEqual(paused.get("state"), "finished")
+        self.assertAlmostEqual(_as_float(paused.get("elapsed_seconds")), 3.0, places=3)
+
+        db_row = self.conn.execute(
+            "SELECT state, running_since_ts, elapsed_seconds FROM timers WHERE id = ?",
+            (timer_id,),
+        ).fetchone()
+        self.assertIsNotNone(db_row)
+        self.assertEqual(str(db_row["state"]), "finished")
+        self.assertIsNone(db_row["running_since_ts"])
+        self.assertAlmostEqual(_as_float(db_row["elapsed_seconds"]), 3.0, places=3)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-import { Fragment, type MouseEvent, useEffect, useMemo, useState } from "react";
+import { Fragment, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { SettingsPage } from "./SettingsPage";
@@ -506,6 +506,15 @@ function trimLabel(text: string, max = 72): string {
   return `${s.slice(0, Math.max(0, max - 1))}…`;
 }
 
+function appDisplayName(raw: string): string {
+  const value = String(raw || "").trim();
+  if (!value || !value.includes(".")) return value;
+  if (/\s/.test(value)) return value;
+  const parts = value.split(".").filter(Boolean);
+  if (parts.length < 2) return value;
+  return parts[parts.length - 1] || value;
+}
+
 function buildTopDetailItems(map: Map<string, number>, limit = 8): SliceDetailsItem[] {
   return Array.from(map.entries())
     .sort((a, b) => b[1] - a[1])
@@ -766,7 +775,7 @@ function addMs(iso: string, deltaMs: number): string {
 async function resolveWindow(
   range: RangeKey,
   dayWindowMode: DayWindowMode,
-  page: PageId,
+  _page: PageId,
   apiBase: string
 ): Promise<TimeWindow> {
   const to = nowIso();
@@ -774,11 +783,7 @@ async function resolveWindow(
     if (dayWindowMode === "midnight") {
       const now = new Date();
       const fromLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      if (page === "stats") {
-        return { from: fromLocal.toISOString(), to };
-      }
-      const toLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-      return { from: fromLocal.toISOString(), to: toLocal.toISOString() };
+      return { from: fromLocal.toISOString(), to };
     }
     return { from: addMs(to, -24 * 3600 * 1000), to };
   }
@@ -1571,7 +1576,7 @@ function LegacyTimeline({
       y: p.y,
       label: `${fmtTs(entry.start_ts)} → ${fmtTs(entry.end_ts)}`,
       meta: `active ${fmtSeconds(entry.active)} · afk ${fmtSeconds(entry.afk)} · off ${fmtSeconds(entry.off)}${
-        entry.top_app ? ` · top ${entry.top_app}` : ""
+        entry.top_app ? ` · top ${appDisplayName(entry.top_app)}` : ""
       }`
     });
   };
@@ -1858,6 +1863,16 @@ export default function App() {
     [themeMode, contrastMode, timerNotifications, timerSound]
   );
 
+  const loadParamsRef = useRef<{
+    page: PageId;
+    topic: TopicId;
+    range: RangeKey;
+    dayWindowMode: DayWindowMode;
+    reloadKey: number;
+    autotagRunId: string;
+    apiBase: string;
+  } | null>(null);
+
   function replaceQuery(nextRange: RangeKey, nextTopic: TopicId, nextDayWindowMode: DayWindowMode): void {
     const params = new URLSearchParams(String(window.location.search || ""));
     params.set("range", nextRange);
@@ -1942,7 +1957,31 @@ export default function App() {
     let loadInFlight = false;
 
     const refreshMs = range === "all" ? ALL_RANGE_REFRESH_MS : DEFAULT_REFRESH_MS;
-    const requested = requestedLoadKeys(page, topic);
+    const previousLoad = loadParamsRef.current;
+    const baseRequested = requestedLoadKeys(page, topic);
+    const runSwitchOnly =
+      previousLoad != null &&
+      previousLoad.page === page &&
+      previousLoad.topic === topic &&
+      previousLoad.range === range &&
+      previousLoad.dayWindowMode === dayWindowMode &&
+      previousLoad.reloadKey === reloadKey &&
+      previousLoad.apiBase === apiBase &&
+      previousLoad.autotagRunId !== autotagRunId;
+    const requested =
+      runSwitchOnly && baseRequested.has("autotag")
+        ? new Set<LoadKey>(["autotag"])
+        : baseRequested;
+
+    loadParamsRef.current = {
+      page,
+      topic,
+      range,
+      dayWindowMode,
+      reloadKey,
+      autotagRunId,
+      apiBase
+    };
 
     async function load() {
       if (loadInFlight) return;
@@ -1954,21 +1993,25 @@ export default function App() {
       const errors: string[] = [];
 
       try {
-        const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
-        const timeWindow = await resolveWindow(range, effectiveDayWindowMode, page, apiBase);
-        if (cancelled || loadId !== activeLoadId) return;
-        setWindowRange(timeWindow);
+        let query = "";
+        let summaryQuery = "";
+        if (!(requested.size === 1 && requested.has("autotag"))) {
+          const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
+          const timeWindow = await resolveWindow(range, effectiveDayWindowMode, page, apiBase);
+          if (cancelled || loadId !== activeLoadId) return;
+          setWindowRange(timeWindow);
 
-        const query = qs(timeWindow);
-        const fromMs = Date.parse(timeWindow.from);
-        const toMs = Date.parse(timeWindow.to);
-        const durationSeconds =
-          !Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs > fromMs ? (toMs - fromMs) / 1000 : 0;
-        const chunkSeconds =
-          page === "dashboard" && range === "24h" && effectiveDayWindowMode === "midnight"
-            ? 3600
-            : chunkSecondsForRange(range, durationSeconds);
-        const summaryQuery = `${query}&chunk_seconds=${chunkSeconds}`;
+          query = qs(timeWindow);
+          const fromMs = Date.parse(timeWindow.from);
+          const toMs = Date.parse(timeWindow.to);
+          const durationSeconds =
+            !Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs > fromMs ? (toMs - fromMs) / 1000 : 0;
+          const chunkSeconds =
+            page === "dashboard" && range === "24h" && effectiveDayWindowMode === "midnight"
+              ? 3600
+              : chunkSecondsForRange(range, durationSeconds);
+          summaryQuery = `${query}&chunk_seconds=${chunkSeconds}`;
+        }
 
         const pending: Array<Promise<void>> = [];
 
@@ -2156,7 +2199,7 @@ export default function App() {
     if (!summary) return [];
 
     const activeAppItems = topApps.slice(0, 8).map((a) => ({
-      label: a.app,
+      label: appDisplayName(a.app),
       value: fmtSeconds(a.seconds || 0)
     }));
 
@@ -2168,7 +2211,7 @@ export default function App() {
       const off = Number(chunk.unknown_seconds || 0);
       if (afk > 0) {
         afkChunkCount += 1;
-        const app = trimLabel(String(chunk.top_app || "unknown"), 84);
+        const app = trimLabel(appDisplayName(String(chunk.top_app || "unknown")), 84);
         afkByTopApp.set(app, (afkByTopApp.get(app) || 0) + afk);
       }
       if (off > 0) offChunkCount += 1;
@@ -3070,7 +3113,7 @@ export default function App() {
       rows.push({
         start: e.start_ts,
         end: e.end_ts,
-        app: asString(e?.data?.app),
+        app: appDisplayName(asString(e?.data?.app)),
         title: asString(e?.data?.title),
         workspace: asString(e?.data?.workspace),
         monitor: asString(e?.data?.monitor)
@@ -3202,7 +3245,7 @@ export default function App() {
   const categoriesAppsSlices = (categories?.apps || []).map((r) => {
     const detail = categories?.app_details?.[r.category];
     const appItems = (detail?.top_apps || []).map((it) => ({
-      label: trimLabel(it.name, 84),
+      label: trimLabel(appDisplayName(it.name), 84),
       value: fmtSeconds(it.seconds)
     }));
     const titleItems = (detail?.top_titles || []).map((it) => ({
@@ -3268,7 +3311,7 @@ export default function App() {
               const pct = a.percent_active ?? a.percent_window ?? 0;
               return (
                 <tr key={a.app}>
-                  <td>{a.app}</td>
+                  <td>{appDisplayName(a.app)}</td>
                   <td>{fmtSeconds(a.seconds || 0)}</td>
                   <td>
                     <div className="shareCell">
@@ -3317,9 +3360,7 @@ export default function App() {
   const rangeLabel =
     range === "24h"
       ? effectiveDayWindowMode === "midnight"
-        ? page === "dashboard"
-          ? "24h (00:00 -> 00:00)"
-          : "24h (00:00 -> jetzt)"
+        ? "24h (00:00 -> jetzt)"
         : "24h (-24h -> jetzt)"
       : range;
 

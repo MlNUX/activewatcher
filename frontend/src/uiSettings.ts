@@ -12,6 +12,12 @@ const KEY_THEME_MODE = "aw.ui.theme";
 const KEY_CONTRAST_MODE = "aw.ui.contrast";
 const KEY_TIMER_NOTIFICATIONS = "aw.timer.notifications";
 const KEY_TIMER_SOUND = "aw.timer.sound";
+const IMPORT_KEYS = new Set([
+  "themeMode",
+  "contrastMode",
+  "timerNotifications",
+  "timerSound"
+]);
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
@@ -81,14 +87,42 @@ function normalizeContrastMode(value: unknown, fallback: ContrastMode): Contrast
   return fallback;
 }
 
-function normalizeBoolean(value: unknown, fallback: boolean): boolean {
+function parseThemeModeFromImport(value: unknown, fallback: ThemeMode): ThemeMode {
+  if (typeof value === "undefined") return fallback;
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (raw === "light" || raw === "white") return "light";
+  if (raw === "dark") return "dark";
+  throw new Error("themeMode must be 'dark' or 'light'");
+}
+
+function parseContrastModeFromImport(
+  value: unknown,
+  fallback: ContrastMode
+): ContrastMode {
+  if (typeof value === "undefined") return fallback;
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (raw === "high" || raw === "high-contrast") return "high";
+  if (raw === "normal") return "normal";
+  throw new Error("contrastMode must be 'normal' or 'high'");
+}
+
+function parseBooleanFromImport(
+  value: unknown,
+  fallback: boolean,
+  fieldName: string
+): boolean {
+  if (typeof value === "undefined") return fallback;
   if (typeof value === "boolean") return value;
   const raw = String(value || "")
     .trim()
     .toLowerCase();
   if (TRUE_VALUES.has(raw)) return true;
   if (FALSE_VALUES.has(raw)) return false;
-  return fallback;
+  throw new Error(`${fieldName} must be a boolean`);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -141,12 +175,19 @@ export function getUiSettingsSnapshot(): UiSettingsSnapshot {
 
 export function applyUiSettingsSnapshot(input: unknown): UiSettingsSnapshot {
   const payload = asRecord(input);
+  if (!Object.keys(payload).some((key) => IMPORT_KEYS.has(key))) {
+    throw new Error("settings import contains no supported fields");
+  }
   const current = getUiSettingsSnapshot();
   const next: UiSettingsSnapshot = {
-    themeMode: normalizeThemeMode(payload.themeMode, current.themeMode),
-    contrastMode: normalizeContrastMode(payload.contrastMode, current.contrastMode),
-    timerNotifications: normalizeBoolean(payload.timerNotifications, current.timerNotifications),
-    timerSound: normalizeBoolean(payload.timerSound, current.timerSound)
+    themeMode: parseThemeModeFromImport(payload.themeMode, current.themeMode),
+    contrastMode: parseContrastModeFromImport(payload.contrastMode, current.contrastMode),
+    timerNotifications: parseBooleanFromImport(
+      payload.timerNotifications,
+      current.timerNotifications,
+      "timerNotifications"
+    ),
+    timerSound: parseBooleanFromImport(payload.timerSound, current.timerSound, "timerSound")
   };
 
   setThemeMode(next.themeMode);

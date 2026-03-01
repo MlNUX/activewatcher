@@ -146,6 +146,40 @@ def _snapshot_from_row(row: sqlite3.Row, *, now: datetime) -> TimerSnapshot:
     )
 
 
+def _should_persist_finished_timer(
+    *, row: sqlite3.Row, snapshot: TimerSnapshot
+) -> bool:
+    if snapshot.kind != "timer" or snapshot.state != "finished":
+        return False
+    stored_state = _normalize_state(row["state"])
+    stored_running_since = row["running_since_ts"]
+    try:
+        stored_elapsed = max(0.0, float(row["elapsed_seconds"] or 0.0))
+    except Exception:  # pragma: no cover - defensive
+        stored_elapsed = 0.0
+    return (
+        stored_state != "finished"
+        or stored_running_since is not None
+        or abs(stored_elapsed - float(snapshot.duration_seconds)) > 1e-6
+    )
+
+
+def _persist_finished_timer(
+    conn: sqlite3.Connection, *, timer_id: int, duration_seconds: int, now_iso: str
+) -> None:
+    conn.execute(
+        """
+        UPDATE timers
+           SET elapsed_seconds = ?,
+               running_since_ts = NULL,
+               state = 'finished',
+               updated_at = ?
+         WHERE id = ?
+        """.strip(),
+        (float(max(0, int(duration_seconds))), now_iso, int(timer_id)),
+    )
+
+
 def _fetch_timer_row(conn: sqlite3.Connection, timer_id: int) -> sqlite3.Row:
     row = conn.execute(
         """
@@ -174,6 +208,7 @@ def list_timers(
     conn: sqlite3.Connection, *, now: datetime | None = None
 ) -> dict[str, Any]:
     instant = _coerce_now(now)
+    now_iso = to_rfc3339(instant)
     rows = conn.execute(
         """
         SELECT
@@ -190,9 +225,33 @@ def list_timers(
          ORDER BY created_at DESC, id DESC
         """.strip()
     ).fetchall()
+
+    snapshots: list[TimerSnapshot] = []
+    finished_to_persist: list[tuple[int, int]] = []
+    for row in rows:
+        snapshot = _snapshot_from_row(row, now=instant)
+        snapshots.append(snapshot)
+        if _should_persist_finished_timer(row=row, snapshot=snapshot):
+            finished_to_persist.append((snapshot.id, snapshot.duration_seconds))
+
+    if finished_to_persist:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for timer_id, duration_seconds in finished_to_persist:
+                _persist_finished_timer(
+                    conn,
+                    timer_id=timer_id,
+                    duration_seconds=duration_seconds,
+                    now_iso=now_iso,
+                )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
     return {
-        "server_ts": to_rfc3339(instant),
-        "timers": [_snapshot_from_row(row, now=instant).to_json() for row in rows],
+        "server_ts": now_iso,
+        "timers": [snapshot.to_json() for snapshot in snapshots],
     }
 
 
@@ -289,6 +348,15 @@ def pause_timer(
         row = _fetch_timer_row(conn, timer_id)
         current = _snapshot_from_row(row, now=instant)
         if current.state != "running":
+            if _should_persist_finished_timer(row=row, snapshot=current):
+                _persist_finished_timer(
+                    conn,
+                    timer_id=current.id,
+                    duration_seconds=current.duration_seconds,
+                    now_iso=now_iso,
+                )
+                row = _fetch_timer_row(conn, timer_id)
+                current = _snapshot_from_row(row, now=instant)
             conn.execute("COMMIT")
             return current.to_json()
 
