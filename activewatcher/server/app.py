@@ -230,13 +230,18 @@ def create_app(db_path: str | Path) -> FastAPI:
         from_ts: str | None = Query(None, alias="from"),
         to_ts: str | None = Query(None, alias="to"),
         chunk_seconds: int = Query(300, ge=30, le=2_592_000),
+        include_timeline: bool = Query(False),
         conn=Depends(_get_conn),
     ) -> dict[str, Any]:
         now = utcnow()
         to_dt = _parse_dt_param(to_ts, default=now)
         from_dt = _parse_dt_param(from_ts, default=(to_dt - timedelta(hours=24)))
         return reports.summary(
-            conn, from_ts=from_dt, to_ts=to_dt, chunk_seconds=chunk_seconds
+            conn,
+            from_ts=from_dt,
+            to_ts=to_dt,
+            chunk_seconds=chunk_seconds,
+            include_timeline=include_timeline,
         )
 
     @app.get("/v1/apps")

@@ -612,6 +612,7 @@ def summary(
     from_ts: datetime | None,
     to_ts: datetime | None,
     chunk_seconds: int,
+    include_timeline: bool = False,
 ) -> dict[str, Any]:
     from_dt, to_dt, window = load_intervals(
         conn, bucket="window", source=None, from_ts=from_ts, to_ts=to_ts
@@ -640,7 +641,7 @@ def summary(
     active_seconds = max(0.0, runtime_seconds - afk_seconds)
     unknown_seconds = max(0.0, total_seconds - runtime_seconds)
 
-    return {
+    payload: dict[str, Any] = {
         "from_ts": to_rfc3339(from_dt),
         "to_ts": to_rfc3339(to_dt),
         "total_seconds": round(total_seconds, 3),
@@ -651,7 +652,6 @@ def summary(
         "top_apps": apps_active if has_idle else apps_total,
         "top_apps_active": apps_active,
         "top_apps_window": apps_total,
-        "timeline": [s.to_json() for s in segments],
         "timeline_chunks": chunk_timeline(
             from_dt=from_dt,
             to_dt=to_dt,
@@ -661,6 +661,11 @@ def summary(
             chunk_seconds=chunk_seconds,
         ),
     }
+
+    if include_timeline:
+        payload["timeline"] = [s.to_json() for s in segments]
+
+    return payload
 
 
 def _add_cat_seconds(totals: dict[str, float], cat: str, seconds: float) -> None:

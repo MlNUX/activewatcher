@@ -353,6 +353,26 @@ function requestedLoadKeys(page: PageId, topic: TopicId): Set<LoadKey> {
   return new Set<LoadKey>();
 }
 
+const ALL_TOPIC_EAGER_KEYS = new Set<LoadKey>(["summary", "categories", "autotag"]);
+
+function splitRequestedKeysForLoad(
+  page: PageId,
+  topic: TopicId,
+  requested: Set<LoadKey>
+): { eager: Set<LoadKey>; deferred: Set<LoadKey> } {
+  if (page !== "stats" || topic !== "all") {
+    return { eager: requested, deferred: new Set<LoadKey>() };
+  }
+
+  const eager = new Set<LoadKey>();
+  const deferred = new Set<LoadKey>();
+  for (const key of requested) {
+    if (ALL_TOPIC_EAGER_KEYS.has(key)) eager.add(key);
+    else deferred.add(key);
+  }
+  return { eager, deferred };
+}
+
 function parseRangeKey(v: string | null | undefined): RangeKey {
   const s = String(v || "");
   if (s === "24h" || s === "1w" || s === "1m" || s === "all") return s;
@@ -1972,6 +1992,7 @@ export default function App() {
       runSwitchOnly && baseRequested.has("autotag")
         ? new Set<LoadKey>(["autotag"])
         : baseRequested;
+    const { eager: eagerRequested, deferred: deferredRequested } = splitRequestedKeysForLoad(page, topic, requested);
 
     loadParamsRef.current = {
       page,
@@ -2013,141 +2034,166 @@ export default function App() {
           summaryQuery = `${query}&chunk_seconds=${chunkSeconds}`;
         }
 
-        const pending: Array<Promise<void>> = [];
+        async function runBatch(keys: Set<LoadKey>): Promise<void> {
+          if (!keys.size) return;
 
-        function queue<T>(
-          label: string,
-          url: string,
-          apply: (value: T) => void,
-          applyErrorFallback: () => void
-        ): void {
-          const p = fetchJson<T>(url)
-            .then((value) => {
-              if (cancelled || loadId !== activeLoadId) return;
-              apply(value);
-            })
-            .catch((e) => {
-              errors.push(`${label}: ${String(e)}`);
-              if (cancelled || loadId !== activeLoadId) return;
-              applyErrorFallback();
-            });
-          pending.push(p);
-        }
+          const pending: Array<Promise<void>> = [];
 
-        if (requested.has("summary")) {
-          queue<SummaryResponse>("summary", `${apiBase}/summary?${summaryQuery}`, (value) => setSummary(value), () => setSummary(null));
-        }
-        if (requested.has("categories")) {
-          queue<CategoriesResponse>(
-            "categories",
-            `${apiBase}/categories?mode=auto&${query}`,
-            (value) => setCategories(value),
-            () => setCategories(null)
-          );
-        }
-        if (requested.has("autotag")) {
-          const p = fetchJson<AutotagRunsResponse>(`${apiBase}/autotag/runs?limit=100`)
-            .then(async (runsValue) => {
-              if (cancelled || loadId !== activeLoadId) return;
-              const runs = Array.isArray(runsValue?.runs) ? runsValue.runs : [];
-              setAutotagRuns(runs);
+          function queue<T>(
+            label: string,
+            url: string,
+            apply: (value: T) => void,
+            applyErrorFallback: () => void
+          ): void {
+            const p = fetchJson<T>(url)
+              .then((value) => {
+                if (cancelled || loadId !== activeLoadId) return;
+                apply(value);
+              })
+              .catch((e) => {
+                errors.push(`${label}: ${String(e)}`);
+                if (cancelled || loadId !== activeLoadId) return;
+                applyErrorFallback();
+              });
+            pending.push(p);
+          }
 
-              const selectedRunId = runs.some((row) => row.run_id === autotagRunId)
-                ? autotagRunId
-                : String(runsValue?.latest_run_id || runs[0]?.run_id || "");
+          if (keys.has("summary")) {
+            queue<SummaryResponse>(
+              "summary",
+              `${apiBase}/summary?${summaryQuery}&include_timeline=false`,
+              (value) => setSummary(value),
+              () => setSummary(null)
+            );
+          }
+          if (keys.has("categories")) {
+            queue<CategoriesResponse>(
+              "categories",
+              `${apiBase}/categories?mode=auto&${query}`,
+              (value) => setCategories(value),
+              () => setCategories(null)
+            );
+          }
+          if (keys.has("autotag")) {
+            const p = fetchJson<AutotagRunsResponse>(`${apiBase}/autotag/runs?limit=100`)
+              .then(async (runsValue) => {
+                if (cancelled || loadId !== activeLoadId) return;
+                const runs = Array.isArray(runsValue?.runs) ? runsValue.runs : [];
+                setAutotagRuns(runs);
 
-              if (selectedRunId !== autotagRunId) {
-                setAutotagRunId(selectedRunId);
-              }
+                const selectedRunId = runs.some((row) => row.run_id === autotagRunId)
+                  ? autotagRunId
+                  : String(runsValue?.latest_run_id || runs[0]?.run_id || "");
 
-              if (!selectedRunId) {
+                if (selectedRunId !== autotagRunId) {
+                  setAutotagRunId(selectedRunId);
+                }
+
+                if (!selectedRunId) {
+                  setAutotagDecisions(null);
+                  setAutotagGenerated(null);
+                  return;
+                }
+
+                const decisionsUrl = `${apiBase}/autotag/decisions?run_id=${encodeURIComponent(selectedRunId)}&limit=600`;
+                try {
+                  const decisionsValue = await fetchJson<AutotagDecisionsResponse>(decisionsUrl);
+                  if (cancelled || loadId !== activeLoadId) return;
+                  setAutotagDecisions(decisionsValue);
+                } catch (e) {
+                  errors.push(`autotag decisions: ${String(e)}`);
+                  if (cancelled || loadId !== activeLoadId) return;
+                  setAutotagDecisions(null);
+                }
+
+                const generatedUrl = `${apiBase}/autotag/generated?run_id=${encodeURIComponent(selectedRunId)}`;
+                try {
+                  const generatedValue = await fetchJson<AutotagGeneratedResponse>(generatedUrl);
+                  if (cancelled || loadId !== activeLoadId) return;
+                  setAutotagGenerated(generatedValue);
+                } catch (e) {
+                  errors.push(`autotag generated: ${String(e)}`);
+                  if (cancelled || loadId !== activeLoadId) return;
+                  setAutotagGenerated(null);
+                }
+              })
+              .catch((e) => {
+                errors.push(`autotag runs: ${String(e)}`);
+                if (cancelled || loadId !== activeLoadId) return;
+                setAutotagRuns([]);
                 setAutotagDecisions(null);
                 setAutotagGenerated(null);
-                return;
-              }
+              });
+            pending.push(p);
+          }
+          if (keys.has("window")) {
+            queue<EventsResponse>(
+              "window",
+              `${apiBase}/events?bucket=window&${query}`,
+              (value) => setWindowEvents(Array.isArray(value.events) ? value.events : []),
+              () => setWindowEvents([])
+            );
+          }
+          if (keys.has("workspace")) {
+            queue<EventsResponse>(
+              "workspace",
+              `${apiBase}/events?bucket=workspace&${query}`,
+              (value) => setWorkspaceEvents(Array.isArray(value.events) ? value.events : []),
+              () => setWorkspaceEvents([])
+            );
+          }
+          if (keys.has("workspace_switch")) {
+            queue<EventsResponse>(
+              "workspace_switch",
+              `${apiBase}/events?bucket=workspace_switch&${query}`,
+              (value) => setWorkspaceSwitchEvents(Array.isArray(value.events) ? value.events : []),
+              () => setWorkspaceSwitchEvents([])
+            );
+          }
+          if (keys.has("system")) {
+            queue<EventsResponse>(
+              "system",
+              `${apiBase}/events?bucket=system&${query}`,
+              (value) => setSystemEvents(Array.isArray(value.events) ? value.events : []),
+              () => setSystemEvents([])
+            );
+          }
+          if (keys.has("browser_tabs")) {
+            queue<EventsResponse>(
+              "browser_tabs",
+              `${apiBase}/events?bucket=browser_tabs&${query}`,
+              (value) => setTabsEvents(Array.isArray(value.events) ? value.events : []),
+              () => setTabsEvents([])
+            );
+          }
+          if (keys.has("window_visible")) {
+            queue<EventsResponse>(
+              "window_visible",
+              `${apiBase}/events?bucket=window_visible&${query}`,
+              (value) => setVisibleEvents(Array.isArray(value.events) ? value.events : []),
+              () => setVisibleEvents([])
+            );
+          }
 
-              const decisionsUrl = `${apiBase}/autotag/decisions?run_id=${encodeURIComponent(selectedRunId)}&limit=600`;
-              try {
-                const decisionsValue = await fetchJson<AutotagDecisionsResponse>(decisionsUrl);
-                if (cancelled || loadId !== activeLoadId) return;
-                setAutotagDecisions(decisionsValue);
-              } catch (e) {
-                errors.push(`autotag decisions: ${String(e)}`);
-                if (cancelled || loadId !== activeLoadId) return;
-                setAutotagDecisions(null);
-              }
-
-              const generatedUrl = `${apiBase}/autotag/generated?run_id=${encodeURIComponent(selectedRunId)}`;
-              try {
-                const generatedValue = await fetchJson<AutotagGeneratedResponse>(generatedUrl);
-                if (cancelled || loadId !== activeLoadId) return;
-                setAutotagGenerated(generatedValue);
-              } catch (e) {
-                errors.push(`autotag generated: ${String(e)}`);
-                if (cancelled || loadId !== activeLoadId) return;
-                setAutotagGenerated(null);
-              }
-            })
-            .catch((e) => {
-              errors.push(`autotag runs: ${String(e)}`);
-              if (cancelled || loadId !== activeLoadId) return;
-              setAutotagRuns([]);
-              setAutotagDecisions(null);
-              setAutotagGenerated(null);
-            });
-          pending.push(p);
-        }
-        if (requested.has("window")) {
-          queue<EventsResponse>(
-            "window",
-            `${apiBase}/events?bucket=window&${query}`,
-            (value) => setWindowEvents(Array.isArray(value.events) ? value.events : []),
-            () => setWindowEvents([])
-          );
-        }
-        if (requested.has("workspace")) {
-          queue<EventsResponse>(
-            "workspace",
-            `${apiBase}/events?bucket=workspace&${query}`,
-            (value) => setWorkspaceEvents(Array.isArray(value.events) ? value.events : []),
-            () => setWorkspaceEvents([])
-          );
-        }
-        if (requested.has("workspace_switch")) {
-          queue<EventsResponse>(
-            "workspace_switch",
-            `${apiBase}/events?bucket=workspace_switch&${query}`,
-            (value) => setWorkspaceSwitchEvents(Array.isArray(value.events) ? value.events : []),
-            () => setWorkspaceSwitchEvents([])
-          );
-        }
-        if (requested.has("system")) {
-          queue<EventsResponse>(
-            "system",
-            `${apiBase}/events?bucket=system&${query}`,
-            (value) => setSystemEvents(Array.isArray(value.events) ? value.events : []),
-            () => setSystemEvents([])
-          );
-        }
-        if (requested.has("browser_tabs")) {
-          queue<EventsResponse>(
-            "browser_tabs",
-            `${apiBase}/events?bucket=browser_tabs&${query}`,
-            (value) => setTabsEvents(Array.isArray(value.events) ? value.events : []),
-            () => setTabsEvents([])
-          );
-        }
-        if (requested.has("window_visible")) {
-          queue<EventsResponse>(
-            "window_visible",
-            `${apiBase}/events?bucket=window_visible&${query}`,
-            (value) => setVisibleEvents(Array.isArray(value.events) ? value.events : []),
-            () => setVisibleEvents([])
-          );
+          await Promise.all(pending);
         }
 
-        await Promise.all(pending);
+        await runBatch(eagerRequested);
         if (cancelled || loadId !== activeLoadId) return;
+
+        if (deferredRequested.size > 0) {
+          setError(errors.join(" | "));
+          setUpdatedAt(new Date().toLocaleTimeString());
+          setLoading(false);
+
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, 0);
+          });
+          if (cancelled || loadId !== activeLoadId) return;
+
+          await runBatch(deferredRequested);
+          if (cancelled || loadId !== activeLoadId) return;
+        }
 
         setError(errors.join(" | "));
         setUpdatedAt(new Date().toLocaleTimeString());
