@@ -1717,8 +1717,12 @@ function LegacyTimeline({
   const peakLeftPct = peak && timelineEntries.length > 0 ? ((peak.idx + 0.5) / timelineEntries.length) * 100 : 0;
   let nowLeftPct: number | null = null;
   if (showNowMarker) {
-    const fromMs = Date.parse(fromTs);
-    const toMs = Date.parse(toTs);
+    const axisFromMs = Date.parse(timelineEntries[0]?.start_ts || "");
+    const axisToMs = Date.parse(timelineEntries[timelineEntries.length - 1]?.end_ts || "");
+    const fallbackFromMs = Date.parse(fromTs);
+    const fallbackToMs = Date.parse(toTs);
+    const fromMs = !Number.isNaN(axisFromMs) ? axisFromMs : fallbackFromMs;
+    const toMs = !Number.isNaN(axisToMs) ? axisToMs : fallbackToMs;
     const nowMs = Date.now();
     if (!Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs > fromMs) {
       const ratio = (nowMs - fromMs) / (toMs - fromMs);
