@@ -2195,7 +2195,37 @@ export default function App() {
           });
           if (cancelled || loadId !== activeLoadId) return;
 
-          await runBatch(deferredRequested);
+          const deferredStages: Array<LoadKey[]> = [
+            ["window_visible", "workspace_switch"],
+            ["window", "workspace"],
+            ["system", "browser_tabs"]
+          ];
+          const handledKeys = new Set<LoadKey>();
+          for (const stageKeys of deferredStages) {
+            const stage = new Set<LoadKey>();
+            for (const key of stageKeys) {
+              if (!deferredRequested.has(key)) continue;
+              stage.add(key);
+              handledKeys.add(key);
+            }
+            if (!stage.size) continue;
+
+            await runBatch(stage);
+            if (cancelled || loadId !== activeLoadId) return;
+
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, 0);
+            });
+            if (cancelled || loadId !== activeLoadId) return;
+          }
+
+          const deferredRemaining = new Set<LoadKey>();
+          for (const key of deferredRequested) {
+            if (!handledKeys.has(key)) deferredRemaining.add(key);
+          }
+          if (deferredRemaining.size > 0) {
+            await runBatch(deferredRemaining);
+          }
           if (cancelled || loadId !== activeLoadId) return;
         }
 

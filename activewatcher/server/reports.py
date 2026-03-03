@@ -345,6 +345,64 @@ def load_intervals(
     return from_dt, to_dt, intervals
 
 
+def _load_ranges(
+    conn: sqlite3.Connection,
+    *,
+    bucket: str | None,
+    source: str | None,
+    from_ts: datetime | None,
+    to_ts: datetime | None,
+) -> tuple[datetime, datetime, list[tuple[datetime, datetime]]]:
+    now = utcnow()
+    to_dt = to_utc(to_ts) if to_ts else now
+    from_dt = to_utc(from_ts) if from_ts else (to_dt - timedelta(hours=24))
+    if to_dt < from_dt:
+        from_dt, to_dt = to_dt, from_dt
+
+    from_iso = to_rfc3339(from_dt)
+    to_iso = to_rfc3339(to_dt)
+
+    where = ["start_ts < ?", "(end_ts IS NULL OR end_ts > ?)"]
+    params: list[Any] = [to_iso, from_iso]
+    if bucket is not None:
+        where.append("bucket = ?")
+        params.append(bucket)
+    if source is not None:
+        where.append("source = ?")
+        params.append(source)
+
+    rows = conn.execute(
+        f"""
+        SELECT start_ts, end_ts, last_seen_ts
+          FROM events
+         WHERE {" AND ".join(where)}
+        """.strip(),
+        tuple(params),
+    ).fetchall()
+
+    ranges: list[tuple[datetime, datetime]] = []
+    stale_after = default_stale_after_seconds()
+    stale_before = to_dt - timedelta(seconds=stale_after) if stale_after > 0 else None
+    for r in rows:
+        start = parse_rfc3339(str(r["start_ts"]))
+        end_raw = r["end_ts"]
+        if end_raw is None:
+            last_seen = parse_rfc3339(str(r["last_seen_ts"]))
+            end = to_dt
+            if stale_before is not None and last_seen < stale_before:
+                end = min(last_seen, to_dt)
+        else:
+            end = parse_rfc3339(str(end_raw))
+
+        start = max(start, from_dt)
+        end = min(end, to_dt)
+        if end <= start:
+            continue
+        ranges.append((start, end))
+
+    return from_dt, to_dt, ranges
+
+
 def data_range(
     conn: sqlite3.Connection,
     *,
@@ -620,7 +678,7 @@ def summary(
     _, _, idle = load_intervals(
         conn, bucket="idle", source=None, from_ts=from_dt, to_ts=to_dt
     )
-    _, _, all_events = load_intervals(
+    _, _, all_ranges = _load_ranges(
         conn, bucket=None, source=None, from_ts=from_dt, to_ts=to_dt
     )
     segments = build_timeline(
@@ -632,7 +690,7 @@ def summary(
     has_idle = any(s.afk is not None for s in segments)
 
     total_seconds = max(0.0, (to_dt - from_dt).total_seconds())
-    runtime_ranges = _merge_ranges([(it.start, it.end) for it in all_events])
+    runtime_ranges = _merge_ranges(all_ranges)
     runtime_seconds = min(total_seconds, _sum_ranges(runtime_ranges))
     afk_ranges = _merge_ranges(
         [(it.start, it.end) for it in idle if bool(it.data.get("afk", False))]
@@ -927,6 +985,178 @@ def _tabs_category_totals(
     return totals
 
 
+def _app_category_stats_from_segments(
+    catalog: CategoryCatalog, segments: list[TimelineSegment], *, only_active: bool
+) -> tuple[dict[str, float], dict[str, dict[str, Any]]]:
+    totals: dict[str, float] = {}
+    apps_by_cat: dict[str, dict[str, float]] = {}
+    titles_by_cat: dict[str, dict[str, float]] = {}
+    category_cache: dict[tuple[str, str], str] = {}
+
+    for seg in segments:
+        if not seg.window:
+            continue
+        if only_active and seg.afk is not False:
+            continue
+
+        dur = seg.duration_seconds()
+        if dur <= 0:
+            continue
+
+        app = str(seg.window.get("app") or "")
+        if not app or app.startswith("__"):
+            continue
+        title = str(seg.window.get("title") or "")
+
+        cache_key = (app.strip().lower(), title.strip().lower())
+        cat = category_cache.get(cache_key)
+        if cat is None:
+            cat = catalog.classify_app(app=app, title=title)
+            category_cache[cache_key] = cat
+
+        _add_cat_seconds(totals, cat, dur)
+        _add_cat_named_seconds(apps_by_cat, category=cat, name=app, seconds=dur)
+        if title:
+            _add_cat_named_seconds(titles_by_cat, category=cat, name=title, seconds=dur)
+
+    details: dict[str, dict[str, Any]] = {}
+    all_cats = set(apps_by_cat) | set(titles_by_cat)
+    for cat in all_cats:
+        details[cat] = {
+            "top_apps": _top_named_rows(apps_by_cat.get(cat, {}), limit=8),
+            "top_titles": _top_named_rows(titles_by_cat.get(cat, {}), limit=8),
+        }
+
+    return totals, details
+
+
+def _app_category_stats_from_intervals(
+    catalog: CategoryCatalog, intervals: list[Interval]
+) -> tuple[dict[str, float], dict[str, dict[str, Any]]]:
+    totals: dict[str, float] = {}
+    apps_by_cat: dict[str, dict[str, float]] = {}
+    titles_by_cat: dict[str, dict[str, float]] = {}
+    category_cache: dict[tuple[str, str], str] = {}
+
+    for it in intervals:
+        dur = it.duration_seconds()
+        if dur <= 0:
+            continue
+
+        app = str(it.data.get("app") or "")
+        if not app or app.startswith("__"):
+            continue
+        title = str(it.data.get("title") or "")
+
+        cache_key = (app.strip().lower(), title.strip().lower())
+        cat = category_cache.get(cache_key)
+        if cat is None:
+            cat = catalog.classify_app(app=app, title=title)
+            category_cache[cache_key] = cat
+
+        _add_cat_seconds(totals, cat, dur)
+        _add_cat_named_seconds(apps_by_cat, category=cat, name=app, seconds=dur)
+        if title:
+            _add_cat_named_seconds(titles_by_cat, category=cat, name=title, seconds=dur)
+
+    details: dict[str, dict[str, Any]] = {}
+    all_cats = set(apps_by_cat) | set(titles_by_cat)
+    for cat in all_cats:
+        details[cat] = {
+            "top_apps": _top_named_rows(apps_by_cat.get(cat, {}), limit=8),
+            "top_titles": _top_named_rows(titles_by_cat.get(cat, {}), limit=8),
+        }
+
+    return totals, details
+
+
+def _tabs_category_stats(
+    catalog: CategoryCatalog, intervals: list[Interval]
+) -> tuple[dict[str, float], dict[str, dict[str, Any]]]:
+    totals: dict[str, float] = {}
+    domains_by_cat: dict[str, dict[str, float]] = {}
+    titles_by_cat: dict[str, dict[str, float]] = {}
+    browsers_by_cat: dict[str, dict[str, float]] = {}
+
+    category_cache: dict[tuple[str, str, str], str] = {}
+    domain_cache: dict[str, str] = {}
+
+    def classify_tab_cached(*, app: str, url: str, title: str) -> str:
+        cache_key = (app.strip().lower(), url.strip().lower(), title.strip().lower())
+        cat = category_cache.get(cache_key)
+        if cat is not None:
+            return cat
+        cat = catalog.classify_tab(url=url, title=title, app=app)
+        category_cache[cache_key] = cat
+        return cat
+
+    for it in intervals:
+        tabs = it.data.get("tabs")
+        if not isinstance(tabs, list) or not tabs:
+            continue
+
+        dur = it.duration_seconds()
+        if dur <= 0:
+            continue
+
+        browser_totals = str(it.data.get("browser") or it.source or "")
+        browser_details = browser_totals or "browser"
+
+        tab_rows = [tab for tab in tabs if isinstance(tab, dict)]
+        if not tab_rows:
+            continue
+        weighted_dur = dur / float(len(tab_rows))
+
+        for tab in tab_rows:
+            url = str(
+                tab.get("url") or tab.get("pending_url") or tab.get("pendingUrl") or ""
+            )
+            title = str(tab.get("title") or "")
+
+            cat_totals = classify_tab_cached(app=browser_totals, url=url, title=title)
+            _add_cat_seconds(totals, cat_totals, weighted_dur)
+
+            if browser_details == browser_totals:
+                cat_details = cat_totals
+            else:
+                cat_details = classify_tab_cached(
+                    app=browser_details, url=url, title=title
+                )
+
+            domain = domain_cache.get(url)
+            if domain is None:
+                domain = _tab_domain_from_url(url)
+                domain_cache[url] = domain
+
+            _add_cat_named_seconds(
+                domains_by_cat, category=cat_details, name=domain, seconds=weighted_dur
+            )
+            _add_cat_named_seconds(
+                browsers_by_cat,
+                category=cat_details,
+                name=browser_details,
+                seconds=weighted_dur,
+            )
+            if title:
+                _add_cat_named_seconds(
+                    titles_by_cat,
+                    category=cat_details,
+                    name=title,
+                    seconds=weighted_dur,
+                )
+
+    details: dict[str, dict[str, Any]] = {}
+    all_cats = set(domains_by_cat) | set(titles_by_cat) | set(browsers_by_cat)
+    for cat in all_cats:
+        details[cat] = {
+            "top_domains": _top_named_rows(domains_by_cat.get(cat, {}), limit=8),
+            "top_titles": _top_named_rows(titles_by_cat.get(cat, {}), limit=8),
+            "top_browsers": _top_named_rows(browsers_by_cat.get(cat, {}), limit=6),
+        }
+
+    return totals, details
+
+
 def categories_summary(
     conn: sqlite3.Connection,
     *,
@@ -948,8 +1178,7 @@ def categories_summary(
             conn, bucket="window_visible", source=None, from_ts=from_ts, to_ts=to_ts
         )
         app_mode = "visible"
-        app_totals = _app_category_totals_from_intervals(catalog, visible)
-        app_details = _app_category_details_from_intervals(catalog, visible)
+        app_totals, app_details = _app_category_stats_from_intervals(catalog, visible)
     else:
         from_dt, to_dt, window = load_intervals(
             conn, bucket="window", source=None, from_ts=from_ts, to_ts=to_ts
@@ -962,18 +1191,14 @@ def categories_summary(
         )
         use_active = mode_norm == "active" or (mode_norm == "auto" and bool(idle))
         app_mode = "active" if use_active else "window"
-        app_totals = _app_category_totals_from_segments(
-            catalog, segments, only_active=use_active
-        )
-        app_details = _app_category_details_from_segments(
+        app_totals, app_details = _app_category_stats_from_segments(
             catalog, segments, only_active=use_active
         )
 
     _, _, tabs = load_intervals(
         conn, bucket="browser_tabs", source=None, from_ts=from_dt, to_ts=to_dt
     )
-    tabs_totals = _tabs_category_totals(catalog, tabs)
-    tab_details = _tabs_category_details(catalog, tabs)
+    tabs_totals, tab_details = _tabs_category_stats(catalog, tabs)
 
     app_rows, app_total_seconds = _category_rows(catalog, app_totals)
     tab_rows, tab_total_seconds = _category_rows(catalog, tabs_totals)
