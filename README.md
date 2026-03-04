@@ -17,6 +17,18 @@ pip install -U pip setuptools wheel
 pip install -e . --no-build-isolation
 ```
 
+Build/update Python deps and build the frontend in one step:
+
+```bash
+make build
+```
+
+Useful targets:
+
+- `make pip-update` updates `pip`, `setuptools`, and `wheel` in `.venv`.
+- `make pip-build` installs the project in editable mode.
+- `make frontend-build` runs `npm ci` and `npm run build` in `frontend/`.
+
 ## Security Defaults
 
 - API CORS is restricted to local origins by default (`127.0.0.1`/`localhost` on ports `5173`, `5174`, `8712`).
@@ -82,17 +94,12 @@ The UI includes top-level tabs: `dashboard`, `stats`, `timers`, `settings`.
 Paths:
 
 - Chromium/Brave: `extensions/browser-tabs/`
-- Firefox: `extensions/browser-tabs-firefox/`
-
-Prebuilt archives:
-
-- Chromium/Brave: `extensions/browser-tabs.zip`
-- Firefox: `extensions/browser-tabs-firefox.zip`
+- Firefox signed package: `extensions/browser-tabs-firefox/activewatscher.xpi`
 
 Install:
 
 - Chromium/Brave: `chrome://extensions` -> Developer mode -> Load unpacked -> select `extensions/browser-tabs/`
-- Firefox: `about:debugging#/runtime/this-firefox` -> Load Temporary Add-on -> select `extensions/browser-tabs-firefox/manifest.json` (or `extensions/browser-tabs-firefox.zip`)
+- Firefox: `about:addons` -> gear icon -> Install Add-on From File -> select `extensions/browser-tabs-firefox/activewatscher.xpi`
 
 If Firefox does not send data, open `about:debugging#/runtime/this-firefox`, click `Inspect` on the extension, and check for `[ActiveWatcher Tabs]` warnings in the console.
 
