@@ -7,21 +7,15 @@ Runs locally on `http://127.0.0.1:8712`.
 
 - Linux + Wayland (Hyprland for `watch hyprland`)
 - Python `>= 3.11`
+- Node.js + npm
 
-Minimal setup:
-
-```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -U pip setuptools wheel
-pip install -e . --no-build-isolation
-```
-
-Build/update Python deps and build the frontend in one step:
+Install/update and build via Makefile:
 
 ```bash
 make build
 ```
+
+`make build` creates `.venv` if needed, updates pip tooling, installs the package in editable mode, then runs `npm ci` and `npm run build` for the frontend.
 
 Useful targets:
 
