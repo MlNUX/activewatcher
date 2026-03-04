@@ -77,13 +77,24 @@ The UI includes top-level tabs: `dashboard`, `stats`, `timers`, `settings`.
 - Settings can be exported/imported and reset to defaults.
 - Preferences are saved in browser local storage (for example `aw.ui.theme`).
 
-## Browser Plugin
+## Browser Plugins
 
-Extension path: `extensions/browser-tabs/`  
-Supported: Brave, Chrome, Firefox
+Paths:
+
+- Chromium/Brave: `extensions/browser-tabs/`
+- Firefox: `extensions/browser-tabs-firefox/`
+
+Prebuilt archives:
+
+- Chromium/Brave: `extensions/browser-tabs.zip`
+- Firefox: `extensions/browser-tabs-firefox.zip`
+
+Install:
 
 - Chromium/Brave: `chrome://extensions` -> Developer mode -> Load unpacked -> select `extensions/browser-tabs/`
-- Firefox: `about:debugging#/runtime/this-firefox` -> Load Temporary Add-on
+- Firefox: `about:debugging#/runtime/this-firefox` -> Load Temporary Add-on -> select `extensions/browser-tabs-firefox/manifest.json` (or `extensions/browser-tabs-firefox.zip`)
+
+If Firefox does not send data, open `about:debugging#/runtime/this-firefox`, click `Inspect` on the extension, and check for `[ActiveWatcher Tabs]` warnings in the console.
 
 The plugin sends tab metrics to `bucket=browser_tabs`.
 

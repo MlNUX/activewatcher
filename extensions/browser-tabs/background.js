@@ -152,7 +152,8 @@ async function postState() {
   let snapshot;
   try {
     snapshot = await collectTabsSnapshot();
-  } catch {
+  } catch (e) {
+    console.warn("[ActiveWatcher Tabs] Failed to collect tab snapshot", e);
     return;
   }
 
@@ -178,9 +179,11 @@ async function postState() {
     });
     if (response.ok) {
       lastPayloadKey = key;
+    } else {
+      console.warn("[ActiveWatcher Tabs] Server rejected state payload", response.status);
     }
-  } catch {
-    // ignore network errors
+  } catch (e) {
+    console.warn("[ActiveWatcher Tabs] Failed to send state payload", e);
   }
 }
 
