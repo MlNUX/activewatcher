@@ -1,20 +1,24 @@
 export type ThemeMode = "dark" | "light";
 export type ContrastMode = "normal" | "high";
+export type DesignVariant = "default" | "terminal";
 
 export type UiSettingsSnapshot = {
   themeMode: ThemeMode;
   contrastMode: ContrastMode;
+  designVariant: DesignVariant;
   timerNotifications: boolean;
   timerSound: boolean;
 };
 
 const KEY_THEME_MODE = "aw.ui.theme";
 const KEY_CONTRAST_MODE = "aw.ui.contrast";
+const KEY_DESIGN_VARIANT = "aw.ui.design";
 const KEY_TIMER_NOTIFICATIONS = "aw.timer.notifications";
 const KEY_TIMER_SOUND = "aw.timer.sound";
 const IMPORT_KEYS = new Set([
   "themeMode",
   "contrastMode",
+  "designVariant",
   "timerNotifications",
   "timerSound"
 ]);
@@ -25,6 +29,7 @@ const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 export const DEFAULT_UI_SETTINGS: UiSettingsSnapshot = {
   themeMode: "dark",
   contrastMode: "normal",
+  designVariant: "default",
   timerNotifications: false,
   timerSound: false
 };
@@ -78,6 +83,15 @@ function normalizeThemeMode(value: unknown, fallback: ThemeMode): ThemeMode {
   return fallback;
 }
 
+function normalizeDesignVariant(value: unknown, fallback: DesignVariant): DesignVariant {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (raw === "terminal") return "terminal";
+  if (raw === "default") return "default";
+  return fallback;
+}
+
 function normalizeContrastMode(value: unknown, fallback: ContrastMode): ContrastMode {
   const raw = String(value || "")
     .trim()
@@ -95,6 +109,19 @@ function parseThemeModeFromImport(value: unknown, fallback: ThemeMode): ThemeMod
   if (raw === "light" || raw === "white") return "light";
   if (raw === "dark") return "dark";
   throw new Error("themeMode must be 'dark' or 'light'");
+}
+
+function parseDesignVariantFromImport(
+  value: unknown,
+  fallback: DesignVariant
+): DesignVariant {
+  if (typeof value === "undefined") return fallback;
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (raw === "terminal") return "terminal";
+  if (raw === "default") return "default";
+  throw new Error("designVariant must be 'default' or 'terminal'");
 }
 
 function parseContrastModeFromImport(
@@ -140,6 +167,14 @@ export function setThemeMode(mode: ThemeMode): void {
   writeString(KEY_THEME_MODE, mode);
 }
 
+export function getDesignVariant(): DesignVariant {
+  return normalizeDesignVariant(readString(KEY_DESIGN_VARIANT), DEFAULT_UI_SETTINGS.designVariant);
+}
+
+export function setDesignVariant(variant: DesignVariant): void {
+  writeString(KEY_DESIGN_VARIANT, variant);
+}
+
 export function getContrastMode(): ContrastMode {
   return normalizeContrastMode(readString(KEY_CONTRAST_MODE), DEFAULT_UI_SETTINGS.contrastMode);
 }
@@ -168,6 +203,7 @@ export function getUiSettingsSnapshot(): UiSettingsSnapshot {
   return {
     themeMode: getThemeMode(),
     contrastMode: getContrastMode(),
+    designVariant: getDesignVariant(),
     timerNotifications: getTimerNotificationsEnabled(),
     timerSound: getTimerSoundEnabled()
   };
@@ -182,6 +218,7 @@ export function applyUiSettingsSnapshot(input: unknown): UiSettingsSnapshot {
   const next: UiSettingsSnapshot = {
     themeMode: parseThemeModeFromImport(payload.themeMode, current.themeMode),
     contrastMode: parseContrastModeFromImport(payload.contrastMode, current.contrastMode),
+    designVariant: parseDesignVariantFromImport(payload.designVariant, current.designVariant),
     timerNotifications: parseBooleanFromImport(
       payload.timerNotifications,
       current.timerNotifications,
@@ -192,6 +229,7 @@ export function applyUiSettingsSnapshot(input: unknown): UiSettingsSnapshot {
 
   setThemeMode(next.themeMode);
   setContrastMode(next.contrastMode);
+  setDesignVariant(next.designVariant);
   setTimerNotificationsEnabled(next.timerNotifications);
   setTimerSoundEnabled(next.timerSound);
 
@@ -201,6 +239,7 @@ export function applyUiSettingsSnapshot(input: unknown): UiSettingsSnapshot {
 export function resetUiSettings(): UiSettingsSnapshot {
   setThemeMode(DEFAULT_UI_SETTINGS.themeMode);
   setContrastMode(DEFAULT_UI_SETTINGS.contrastMode);
+  setDesignVariant(DEFAULT_UI_SETTINGS.designVariant);
   setTimerNotificationsEnabled(DEFAULT_UI_SETTINGS.timerNotifications);
   setTimerSoundEnabled(DEFAULT_UI_SETTINGS.timerSound);
   return getUiSettingsSnapshot();

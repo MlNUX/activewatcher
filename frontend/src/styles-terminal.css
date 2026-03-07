@@ -1,0 +1,1078 @@
+/*  ================================================================
+ *  ACTIVEWATCHER  -  TERMINAL / BRUTALIST  DESIGN VARIANT
+ *  ================================================================
+ *  Activated via body.design-terminal
+ *  Sharp corners, monospace everything, CRT scan-lines,
+ *  neon green/amber on deep black, no rounded corners,
+ *  no glass morphism, raw brutalist layout.
+ *  ================================================================ */
+
+/* ---- base variables ---- */
+body.design-terminal {
+  --bg0: #000000;
+  --bg1: #0a0a0a;
+  --bg2: #111111;
+  --app-bg: #000000;
+  --panel-bg: rgba(0, 255, 65, 0.03);
+  --panel-bg-strong: rgba(0, 255, 65, 0.05);
+  --glass-bg: rgba(0, 0, 0, 0.95);
+  --surface: rgba(0, 255, 65, 0.06);
+  --surface-strong: rgba(0, 255, 65, 0.1);
+  --line: rgba(0, 255, 65, 0.2);
+  --line-strong: rgba(0, 255, 65, 0.5);
+  --ink: rgba(0, 255, 65, 0.92);
+  --muted: rgba(0, 255, 65, 0.55);
+  --muted-soft: rgba(0, 255, 65, 0.35);
+  --ok: #00ff41;
+  --warn: #ffb700;
+  --danger: #ff2d2d;
+  --accent: #00ff41;
+  --accent-strong: #00ff41;
+  --shadow-soft: 0 0 20px rgba(0, 255, 65, 0.08);
+  --shadow-card: 0 0 12px rgba(0, 255, 65, 0.06);
+  --radius-xl: 0px;
+  --radius-lg: 0px;
+  --radius-md: 0px;
+}
+
+/* ---- light mode override for terminal ---- */
+body.design-terminal.theme-light {
+  --bg0: #e8ffe8;
+  --bg1: #d4f5d4;
+  --bg2: #c0ecc0;
+  --app-bg: #e8ffe8;
+  --panel-bg: rgba(0, 80, 20, 0.04);
+  --panel-bg-strong: rgba(0, 80, 20, 0.07);
+  --glass-bg: rgba(232, 255, 232, 0.96);
+  --surface: rgba(0, 80, 20, 0.06);
+  --surface-strong: rgba(0, 80, 20, 0.1);
+  --line: rgba(0, 80, 20, 0.25);
+  --line-strong: rgba(0, 80, 20, 0.5);
+  --ink: rgba(0, 50, 10, 0.94);
+  --muted: rgba(0, 60, 15, 0.6);
+  --muted-soft: rgba(0, 60, 15, 0.4);
+  --ok: #007722;
+  --warn: #885500;
+  --danger: #aa0000;
+  --accent: #007722;
+  --accent-strong: #005518;
+  --shadow-soft: 0 2px 8px rgba(0, 80, 20, 0.1);
+  --shadow-card: 0 1px 4px rgba(0, 80, 20, 0.08);
+}
+
+/* ---- high contrast for terminal ---- */
+body.design-terminal.theme-high-contrast {
+  --line: rgba(0, 255, 65, 0.55);
+  --line-strong: rgba(0, 255, 65, 0.88);
+  --ink: #00ff41;
+  --muted: rgba(0, 255, 65, 0.82);
+  --muted-soft: rgba(0, 255, 65, 0.65);
+}
+
+body.design-terminal.theme-light.theme-high-contrast {
+  --line: rgba(0, 80, 20, 0.6);
+  --line-strong: rgba(0, 80, 20, 0.85);
+  --ink: rgba(0, 30, 5, 0.99);
+  --muted: rgba(0, 45, 10, 0.88);
+  --muted-soft: rgba(0, 55, 15, 0.72);
+}
+
+/* ---- body styling ---- */
+body.design-terminal {
+  font-family: "JetBrains Mono", "IBM Plex Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+  background: var(--bg0);
+  background-attachment: fixed;
+  image-rendering: pixelated;
+}
+
+/* CRT scan-lines overlay */
+body.design-terminal::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.035;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 255, 65, 0.08) 0px,
+    rgba(0, 255, 65, 0.08) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: screen;
+}
+
+body.design-terminal.theme-light::before {
+  opacity: 0.025;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 80, 20, 0.06) 0px,
+    rgba(0, 80, 20, 0.06) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* ---- global typography ---- */
+body.design-terminal,
+body.design-terminal *,
+body.design-terminal h1,
+body.design-terminal h2,
+body.design-terminal h3,
+body.design-terminal .sub,
+body.design-terminal .pill,
+body.design-terminal .kpi,
+body.design-terminal .kpi span,
+body.design-terminal .kpi strong,
+body.design-terminal table,
+body.design-terminal th,
+body.design-terminal td,
+body.design-terminal .barLabel,
+body.design-terminal .barValue,
+body.design-terminal .barSub,
+body.design-terminal .legendRow,
+body.design-terminal .donutText,
+body.design-terminal .empty {
+  font-family: "JetBrains Mono", "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
+}
+
+body.design-terminal h1 {
+  font-size: clamp(22px, 3vw, 36px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(0, 255, 65, 0.4);
+}
+
+body.design-terminal.theme-light h1 {
+  text-shadow: none;
+}
+
+body.design-terminal h2 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+body.design-terminal h3 {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 4px;
+  margin-bottom: 8px;
+}
+
+/* ---- page container ---- */
+body.design-terminal .page {
+  width: min(1400px, calc(100% - 16px));
+  margin: 8px auto 32px;
+  gap: 2px;
+}
+
+/* ---- header ---- */
+body.design-terminal .header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 10px 12px;
+  backdrop-filter: none;
+  background: var(--bg0);
+  box-shadow: none;
+  border-bottom: 2px solid var(--accent);
+}
+
+body.design-terminal .brandLine {
+  gap: 16px;
+}
+
+/* ---- pills / buttons ---- */
+body.design-terminal .pill {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: all 80ms linear;
+}
+
+body.design-terminal .pill:hover {
+  border-color: var(--accent);
+  background: rgba(0, 255, 65, 0.08);
+  color: var(--ink);
+  transform: none;
+  text-shadow: 0 0 6px rgba(0, 255, 65, 0.3);
+}
+
+body.design-terminal .pill.active {
+  color: #000000;
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(0, 255, 65, 0.3);
+  text-shadow: none;
+}
+
+body.design-terminal.theme-light .pill {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+
+body.design-terminal.theme-light .pill:hover {
+  border-color: var(--accent);
+  background: rgba(0, 80, 20, 0.06);
+  color: var(--ink);
+}
+
+body.design-terminal.theme-light .pill.active {
+  color: #ffffff;
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: none;
+}
+
+body.design-terminal .pill.danger {
+  color: var(--danger);
+  border-color: rgba(255, 45, 45, 0.4);
+  background: rgba(255, 45, 45, 0.08);
+}
+
+body.design-terminal .pill.danger:hover {
+  color: #ff4444;
+  border-color: rgba(255, 45, 45, 0.7);
+  background: rgba(255, 45, 45, 0.15);
+}
+
+body.design-terminal.theme-light .pill.danger {
+  color: var(--danger);
+  border-color: rgba(170, 0, 0, 0.4);
+  background: rgba(170, 0, 0, 0.06);
+}
+
+/* ---- subnav ---- */
+body.design-terminal .subnav {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg0);
+  backdrop-filter: none;
+  border-top: none;
+}
+
+body.design-terminal .subnav .pill {
+  font-size: 10px;
+  padding: 6px 10px;
+}
+
+/* ---- cards ---- */
+body.design-terminal .card {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg1);
+  box-shadow: none;
+  animation: terminalCardIn 120ms linear both;
+}
+
+body.design-terminal .card:hover {
+  border-color: var(--line-strong);
+}
+
+body.design-terminal .cardHd {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 255, 65, 0.03);
+}
+
+body.design-terminal.theme-light .cardHd {
+  background: rgba(0, 80, 20, 0.03);
+}
+
+body.design-terminal .cardBd {
+  padding: 12px;
+}
+
+body.design-terminal .page-stats .card {
+  border-radius: 0;
+}
+
+@keyframes terminalCardIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---- status card ---- */
+body.design-terminal .statusCard {
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+
+body.design-terminal .statusBadge {
+  border-radius: 0;
+  border: 1px solid var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+body.design-terminal .statusCard.isOk .statusBadge {
+  color: #000000;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+body.design-terminal .statusCard.isLoading .statusBadge {
+  color: #000000;
+  border-color: var(--warn);
+  background: var(--warn);
+}
+
+body.design-terminal .statusCard.isError .statusBadge {
+  color: #000000;
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+body.design-terminal .statusHealthy {
+  color: var(--accent);
+}
+
+body.design-terminal .statusIssue {
+  color: var(--danger);
+}
+
+body.design-terminal.theme-light .statusCard.isOk .statusBadge {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+body.design-terminal.theme-light .statusCard.isLoading .statusBadge {
+  color: #ffffff;
+  background: var(--warn);
+  border-color: var(--warn);
+}
+
+body.design-terminal.theme-light .statusCard.isError .statusBadge {
+  color: #ffffff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ---- KPI grid ---- */
+body.design-terminal .kpi {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 10px;
+}
+
+body.design-terminal .kpi strong {
+  color: var(--accent);
+  font-size: clamp(20px, 2.4vw, 30px);
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.35);
+}
+
+body.design-terminal.theme-light .kpi strong {
+  color: var(--accent);
+  text-shadow: none;
+}
+
+/* ---- donut chart ---- */
+body.design-terminal .donutRing {
+  stroke: rgba(0, 255, 65, 0.1);
+}
+
+body.design-terminal .donutText {
+  fill: var(--accent);
+  font-weight: 700;
+}
+
+body.design-terminal.theme-light .donutRing {
+  stroke: rgba(0, 80, 20, 0.15);
+}
+
+body.design-terminal.theme-light .donutText {
+  fill: var(--accent);
+}
+
+/* ---- legend ---- */
+body.design-terminal .dot {
+  border-radius: 0;
+}
+
+body.design-terminal .legendRow.active {
+  background: rgba(0, 255, 65, 0.08);
+  border-radius: 0;
+}
+
+/* ---- tooltips ---- */
+body.design-terminal .uiTooltip,
+body.design-terminal .donutTooltip {
+  border: 1px solid var(--accent);
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.96);
+  box-shadow: 0 0 12px rgba(0, 255, 65, 0.15);
+  backdrop-filter: none;
+}
+
+body.design-terminal.theme-light .uiTooltip,
+body.design-terminal.theme-light .donutTooltip {
+  background: rgba(232, 255, 232, 0.98);
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 80, 20, 0.12);
+}
+
+/* ---- chart modal ---- */
+body.design-terminal .chartModalBackdrop {
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: none;
+}
+
+body.design-terminal .chartModal {
+  border: 2px solid var(--accent);
+  border-radius: 0;
+  background: var(--bg0);
+  box-shadow: 0 0 40px rgba(0, 255, 65, 0.12);
+}
+
+body.design-terminal .chartModalHd {
+  border-bottom: 1px solid var(--line);
+}
+
+body.design-terminal .chartMetric {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.design-terminal .chartProgress {
+  border-radius: 0;
+  border: 1px solid var(--line);
+  background: transparent;
+}
+
+body.design-terminal .chartDetailSection {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.design-terminal .chartDetailRow {
+  border-bottom-style: solid;
+  border-bottom-color: rgba(0, 255, 65, 0.12);
+}
+
+/* ---- horizontal bars ---- */
+body.design-terminal .barTrack {
+  border-radius: 0;
+  border: 1px solid rgba(0, 255, 65, 0.15);
+  background: transparent;
+}
+
+body.design-terminal .barFill {
+  background: var(--accent);
+  opacity: 0.7;
+}
+
+body.design-terminal.theme-light .barTrack {
+  border-color: rgba(0, 80, 20, 0.2);
+  background: transparent;
+}
+
+body.design-terminal.theme-light .barFill {
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+/* ---- inline bars (apps table) ---- */
+body.design-terminal .inlineBarTrack {
+  border-radius: 0;
+  border: 1px solid rgba(0, 255, 65, 0.15);
+  background: transparent;
+}
+
+body.design-terminal .inlineBarFill {
+  background: var(--accent);
+  opacity: 0.7;
+}
+
+body.design-terminal.theme-light .inlineBarTrack {
+  border-color: rgba(0, 80, 20, 0.2);
+  background: transparent;
+}
+
+body.design-terminal.theme-light .inlineBarFill {
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+/* ---- line charts ---- */
+body.design-terminal .lineSvg {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg0);
+}
+
+body.design-terminal .axis {
+  stroke: rgba(0, 255, 65, 0.2);
+}
+
+body.design-terminal .lineArea {
+  fill: rgba(0, 255, 65, 0.08);
+}
+
+body.design-terminal .linePath {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+body.design-terminal .linePoint {
+  fill: var(--accent);
+  stroke: var(--bg0);
+}
+
+body.design-terminal .lineYLabel,
+body.design-terminal .lineXLabel {
+  fill: var(--muted);
+}
+
+body.design-terminal.theme-light .lineSvg {
+  background: var(--bg0);
+  border-color: var(--line);
+}
+
+body.design-terminal.theme-light .axis {
+  stroke: rgba(0, 80, 20, 0.2);
+}
+
+body.design-terminal.theme-light .lineArea {
+  fill: rgba(0, 80, 20, 0.08);
+}
+
+body.design-terminal.theme-light .linePath {
+  stroke: var(--accent);
+}
+
+body.design-terminal.theme-light .linePoint {
+  fill: var(--accent);
+  stroke: var(--bg0);
+}
+
+body.design-terminal.theme-light .lineYLabel,
+body.design-terminal.theme-light .lineXLabel {
+  fill: var(--muted);
+}
+
+/* ---- timeline ---- */
+body.design-terminal .barColLegacy {
+  border-radius: 0;
+  border: 1px solid rgba(0, 255, 65, 0.12);
+  background: rgba(0, 255, 65, 0.02);
+}
+
+body.design-terminal .barSegLegacy.active {
+  background: rgba(0, 255, 65, 0.7);
+}
+
+body.design-terminal .barSegLegacy.afk {
+  background: rgba(255, 183, 0, 0.7);
+}
+
+body.design-terminal .timelineGridLegacy span {
+  background: rgba(0, 255, 65, 0.08);
+}
+
+body.design-terminal .timelineAvgLegacy {
+  border-top-color: rgba(255, 183, 0, 0.7);
+}
+
+body.design-terminal .timelinePeakLegacy {
+  border-left-color: var(--accent);
+}
+
+body.design-terminal .timelinePeakLegacy::after {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  border-radius: 0;
+}
+
+body.design-terminal .timelineNowLegacy {
+  border-left-color: #00ff41;
+}
+
+body.design-terminal .timelineNowLegacy::after {
+  border: 1px solid #00ff41;
+  background: #00ff41;
+  border-radius: 0;
+}
+
+/* ---- tables ---- */
+body.design-terminal th,
+body.design-terminal td {
+  border-bottom: 1px solid rgba(0, 255, 65, 0.12);
+  padding: 6px 8px;
+}
+
+body.design-terminal th {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+body.design-terminal td {
+  color: var(--ink);
+}
+
+body.design-terminal tbody tr:nth-child(even) {
+  background: rgba(0, 255, 65, 0.02);
+}
+
+body.design-terminal tbody tr:hover {
+  background: rgba(0, 255, 65, 0.06);
+}
+
+body.design-terminal.theme-light th {
+  color: var(--accent);
+}
+
+body.design-terminal.theme-light td {
+  color: var(--ink);
+}
+
+body.design-terminal.theme-light tbody tr:nth-child(even) {
+  background: rgba(0, 80, 20, 0.03);
+}
+
+body.design-terminal.theme-light tbody tr:hover {
+  background: rgba(0, 80, 20, 0.06);
+}
+
+/* ---- workspace heatmap ---- */
+body.design-terminal .wsHeatmapWrap {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.design-terminal .wsHeatmapGradient {
+  border-radius: 0;
+  border: 1px solid rgba(0, 255, 65, 0.3);
+}
+
+body.design-terminal .wsHeatmapCell {
+  border-radius: 0;
+  border: 1px solid rgba(0, 255, 65, 0.12);
+}
+
+/* ---- workspace transition matrix ---- */
+body.design-terminal .wsMatrixWrap {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.design-terminal .wsMatrixCell {
+  border-radius: 0;
+  border: 1px solid rgba(0, 255, 65, 0.12);
+}
+
+body.design-terminal .wsMatrixCell.active {
+  border-color: rgba(0, 255, 65, 0.3);
+}
+
+body.design-terminal .wsMatrixCellDot {
+  border-radius: 0;
+  background: rgba(0, 255, 65, 0.15);
+}
+
+body.design-terminal .wsTransitionTag {
+  border-radius: 0;
+}
+
+body.design-terminal .monitorSetupBadge {
+  border-radius: 0;
+}
+
+body.design-terminal .monitorSetupBadge.single {
+  background: rgba(0, 255, 65, 0.12);
+  border-color: rgba(0, 255, 65, 0.35);
+  color: var(--accent);
+}
+
+body.design-terminal .monitorSetupBadge.multi {
+  background: rgba(255, 183, 0, 0.12);
+  border-color: rgba(255, 183, 0, 0.35);
+  color: var(--warn);
+}
+
+body.design-terminal .monitorSetupBadge.unknown {
+  background: rgba(0, 255, 65, 0.05);
+  border-color: rgba(0, 255, 65, 0.15);
+  color: var(--muted);
+}
+
+body.design-terminal.theme-light .monitorSetupBadge.single {
+  background: rgba(0, 80, 20, 0.08);
+  border-color: rgba(0, 80, 20, 0.25);
+  color: var(--accent);
+}
+
+body.design-terminal.theme-light .monitorSetupBadge.multi {
+  background: rgba(136, 85, 0, 0.08);
+  border-color: rgba(136, 85, 0, 0.25);
+  color: var(--warn);
+}
+
+/* ---- autotag ---- */
+body.design-terminal .autotagApplyBadge {
+  border-radius: 0;
+}
+
+body.design-terminal .autotagApplyBadge.ok {
+  background: rgba(0, 255, 65, 0.1);
+  border-color: rgba(0, 255, 65, 0.4);
+  color: var(--accent);
+}
+
+body.design-terminal .autotagApplyBadge.warn {
+  background: rgba(255, 183, 0, 0.1);
+  border-color: rgba(255, 183, 0, 0.4);
+  color: var(--warn);
+}
+
+body.design-terminal .autotagApprovePanel {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.design-terminal .autotagApproveField input {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
+body.design-terminal .autotagApproveField input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.2);
+}
+
+body.design-terminal .autotagJsonWrap {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg0);
+}
+
+body.design-terminal .autotagJsonPre {
+  color: var(--ink);
+}
+
+/* ---- timers ---- */
+body.design-terminal .timersCreatePanel {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.design-terminal .timersField input,
+body.design-terminal .timersField select {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
+body.design-terminal .timersField input:focus,
+body.design-terminal .timersField select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.2);
+}
+
+body.design-terminal .timersSelect {
+  border-radius: 0;
+  border-color: var(--line);
+  background: transparent;
+  box-shadow: none;
+}
+
+body.design-terminal .timersSelect:hover {
+  border-color: var(--line-strong);
+  background: rgba(0, 255, 65, 0.04);
+}
+
+body.design-terminal .timersSelect:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.2);
+}
+
+body.design-terminal .timersSelect option {
+  color: var(--ink);
+  background: var(--bg0);
+}
+
+body.design-terminal .timersHint,
+body.design-terminal .timersEmpty {
+  border: 1px dashed var(--line);
+  border-radius: 0;
+}
+
+body.design-terminal .timersItem {
+  --timer-accent: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg1);
+  box-shadow: none;
+}
+
+body.design-terminal .timersItem.tone-running {
+  --timer-accent: #00ff41;
+  border-color: rgba(0, 255, 65, 0.4);
+}
+
+body.design-terminal .timersItem.tone-paused,
+body.design-terminal .timersItem.tone-idle {
+  --timer-accent: rgba(0, 255, 65, 0.4);
+}
+
+body.design-terminal .timersItem.tone-finished {
+  --timer-accent: #ffb700;
+  border-color: rgba(255, 183, 0, 0.4);
+}
+
+body.design-terminal .timersDialTrack {
+  stroke: rgba(0, 255, 65, 0.1);
+}
+
+body.design-terminal .timersDialFill {
+  filter: drop-shadow(0 0 4px rgba(0, 255, 65, 0.4));
+}
+
+body.design-terminal .timersDialValue,
+body.design-terminal .timersCounterValue {
+  color: var(--accent);
+}
+
+body.design-terminal .timersCounterShell {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.design-terminal .timersLiveDot {
+  border-radius: 0;
+  border: 1px solid var(--muted);
+  background: var(--muted);
+}
+
+body.design-terminal .timersLiveDot.isLive {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+body.design-terminal .timersBadge {
+  border-radius: 0;
+}
+
+body.design-terminal .timersBadge.kind-timer {
+  background: rgba(0, 255, 65, 0.08);
+  border-color: rgba(0, 255, 65, 0.3);
+  color: var(--accent);
+}
+
+body.design-terminal .timersBadge.kind-counter {
+  background: rgba(0, 255, 65, 0.06);
+  border-color: rgba(0, 255, 65, 0.2);
+  color: var(--muted);
+}
+
+body.design-terminal .timersBadge.state-running {
+  background: rgba(0, 255, 65, 0.12);
+  border-color: rgba(0, 255, 65, 0.4);
+  color: var(--accent);
+}
+
+body.design-terminal .timersBadge.state-paused,
+body.design-terminal .timersBadge.state-idle {
+  background: rgba(0, 255, 65, 0.04);
+  border-color: rgba(0, 255, 65, 0.15);
+  color: var(--muted);
+}
+
+body.design-terminal .timersBadge.state-finished {
+  background: rgba(255, 183, 0, 0.1);
+  border-color: rgba(255, 183, 0, 0.35);
+  color: var(--warn);
+}
+
+body.design-terminal .timersControls .pill {
+  border-radius: 0;
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+
+body.design-terminal .timersControls .pill:hover {
+  border-color: var(--accent);
+  background: rgba(0, 255, 65, 0.06);
+  color: var(--ink);
+}
+
+body.design-terminal .timersCtlPrimary.pill.active {
+  color: #000000;
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.25);
+}
+
+body.design-terminal .timersCtlDanger {
+  color: var(--danger);
+  border-color: rgba(255, 45, 45, 0.35);
+  background: rgba(255, 45, 45, 0.06);
+}
+
+body.design-terminal .timersCtlDanger:hover {
+  color: #ff4444;
+  border-color: rgba(255, 45, 45, 0.6);
+  background: rgba(255, 45, 45, 0.12);
+}
+
+/* light mode timer overrides */
+body.design-terminal.theme-light .timersItem {
+  --timer-accent: var(--accent);
+  border-color: var(--line);
+  background: var(--bg2);
+  box-shadow: none;
+}
+
+body.design-terminal.theme-light .timersDialTrack {
+  stroke: rgba(0, 80, 20, 0.12);
+}
+
+body.design-terminal.theme-light .timersDialFill {
+  filter: none;
+}
+
+body.design-terminal.theme-light .timersDialValue,
+body.design-terminal.theme-light .timersCounterValue {
+  color: var(--ink);
+}
+
+/* ---- settings panel ---- */
+body.design-terminal .settingsPanel {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.design-terminal .settingsSection {
+  border-bottom: 1px solid var(--line);
+}
+
+body.design-terminal.theme-light .settingsPanel {
+  border-color: var(--line);
+  background: transparent;
+}
+
+/* ---- scroll wrappers ---- */
+body.design-terminal .monitorPeriodsWrap,
+body.design-terminal .tableScrollWrap,
+body.design-terminal .listScrollWrap {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+body.design-terminal .monitorPeriodsWrap thead th,
+body.design-terminal .tableScrollWrap thead th {
+  background: var(--bg0);
+}
+
+body.design-terminal.theme-light .monitorPeriodsWrap thead th,
+body.design-terminal.theme-light .tableScrollWrap thead th {
+  background: var(--bg0);
+  color: var(--accent);
+}
+
+/* scrollbar */
+body.design-terminal .monitorPeriodsWrap::-webkit-scrollbar-thumb,
+body.design-terminal .tableScrollWrap::-webkit-scrollbar-thumb,
+body.design-terminal .listScrollWrap::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 65, 0.3);
+  border-radius: 0;
+}
+
+body.design-terminal .monitorPeriodsWrap::-webkit-scrollbar-track,
+body.design-terminal .tableScrollWrap::-webkit-scrollbar-track,
+body.design-terminal .listScrollWrap::-webkit-scrollbar-track {
+  background: rgba(0, 255, 65, 0.03);
+}
+
+body.design-terminal .monitorPeriodsWrap,
+body.design-terminal .tableScrollWrap,
+body.design-terminal .listScrollWrap {
+  scrollbar-color: rgba(0, 255, 65, 0.3) rgba(0, 255, 65, 0.03);
+}
+
+body.design-terminal.theme-light .monitorPeriodsWrap::-webkit-scrollbar-thumb,
+body.design-terminal.theme-light .tableScrollWrap::-webkit-scrollbar-thumb,
+body.design-terminal.theme-light .listScrollWrap::-webkit-scrollbar-thumb {
+  background: rgba(0, 80, 20, 0.25);
+}
+
+/* ---- blinking cursor after h1 ---- */
+body.design-terminal h1::after {
+  content: "_";
+  animation: terminalBlink 1s step-end infinite;
+  color: var(--accent);
+}
+
+@keyframes terminalBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ---- prompt prefix for h2 ---- */
+body.design-terminal .cardHd h2::before {
+  content: "> ";
+  color: var(--accent);
+}
+
+/* ---- subtle glow on focused interactive ---- */
+body.design-terminal .legendButton:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 0;
+}
+
+/* ---- responsive overrides ---- */
+@media (max-width: 760px) {
+  body.design-terminal .page {
+    width: calc(100% - 8px);
+    margin-top: 4px;
+    gap: 2px;
+  }
+
+  body.design-terminal h1 {
+    font-size: 20px;
+  }
+
+  body.design-terminal .pill {
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+}

@@ -242,6 +242,26 @@ export function SettingsPage({
                   </button>
                 </div>
               </div>
+
+              <div className="settingsField">
+                <span>design</span>
+                <div className="settingsToggleRow">
+                  <button
+                    type="button"
+                    className={settings.designVariant === "default" ? "pill active" : "pill"}
+                    onClick={() => onChange({ designVariant: "default" })}
+                  >
+                    aurora
+                  </button>
+                  <button
+                    type="button"
+                    className={settings.designVariant === "terminal" ? "pill active" : "pill"}
+                    onClick={() => onChange({ designVariant: "terminal" })}
+                  >
+                    terminal
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 

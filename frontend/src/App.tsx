@@ -6,13 +6,16 @@ import { TimersPage } from "./TimersPage";
 import {
   applyUiSettingsSnapshot,
   getContrastMode,
+  getDesignVariant,
   getTimerNotificationsEnabled,
   getTimerSoundEnabled,
   resetUiSettings,
   setContrastMode,
+  setDesignVariant,
   setTimerNotificationsEnabled,
   setTimerSoundEnabled,
   type ContrastMode,
+  type DesignVariant,
   type UiSettingsSnapshot
 } from "./uiSettings";
 import { useThemeMode } from "./useThemeMode";
@@ -1826,6 +1829,7 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [themeMode, onThemeModeChange] = useThemeMode();
   const [contrastMode, setContrastModeState] = useState<ContrastMode>(() => getContrastMode());
+  const [designVariant, setDesignVariantState] = useState<DesignVariant>(() => getDesignVariant());
   const [timerNotifications, setTimerNotificationsState] = useState(() => getTimerNotificationsEnabled());
   const [timerSound, setTimerSoundState] = useState(() => getTimerSoundEnabled());
 
@@ -1834,9 +1838,19 @@ export default function App() {
     document.body.classList.toggle("theme-high-contrast", contrastMode === "high");
   }, [contrastMode]);
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.toggle("design-terminal", designVariant === "terminal");
+  }, [designVariant]);
+
   function onContrastModeChange(next: ContrastMode): void {
     setContrastModeState(next);
     setContrastMode(next);
+  }
+
+  function onDesignVariantChange(next: DesignVariant): void {
+    setDesignVariantState(next);
+    setDesignVariant(next);
   }
 
   function onTimerNotificationsChange(enabled: boolean): void {
@@ -1852,6 +1866,7 @@ export default function App() {
   function syncSettings(next: UiSettingsSnapshot): void {
     onThemeModeChange(next.themeMode);
     onContrastModeChange(next.contrastMode);
+    onDesignVariantChange(next.designVariant);
     onTimerNotificationsChange(next.timerNotifications);
     onTimerSoundChange(next.timerSound);
   }
@@ -1859,6 +1874,7 @@ export default function App() {
   function onSettingsChange(patch: Partial<UiSettingsSnapshot>): void {
     if (patch.themeMode) onThemeModeChange(patch.themeMode);
     if (patch.contrastMode) onContrastModeChange(patch.contrastMode);
+    if (patch.designVariant) onDesignVariantChange(patch.designVariant);
     if (typeof patch.timerNotifications === "boolean") onTimerNotificationsChange(patch.timerNotifications);
     if (typeof patch.timerSound === "boolean") onTimerSoundChange(patch.timerSound);
   }
@@ -1881,10 +1897,11 @@ export default function App() {
     () => ({
       themeMode,
       contrastMode,
+      designVariant,
       timerNotifications,
       timerSound
     }),
-    [themeMode, contrastMode, timerNotifications, timerSound]
+    [themeMode, contrastMode, designVariant, timerNotifications, timerSound]
   );
 
   const loadParamsRef = useRef<{
