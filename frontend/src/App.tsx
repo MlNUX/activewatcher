@@ -1,4 +1,4 @@
-import { Fragment, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { SettingsPage } from "./SettingsPage";
@@ -380,6 +380,138 @@ function parseRangeKey(v: string | null | undefined): RangeKey {
   const s = String(v || "");
   if (s === "24h" || s === "1w" || s === "1m" || s === "all") return s;
   return "24h";
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function startOfLocalWeek(date: Date): Date {
+  const start = startOfLocalDay(date);
+  const day = start.getDay();
+  const offset = (day + 6) % 7;
+  start.setDate(start.getDate() - offset);
+  return start;
+}
+
+function formatLocalDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseLocalDateKey(v: string | null | undefined): Date | null {
+  const s = String(v || "").trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+
+  const y = Number(m[1]);
+  const mon = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isInteger(y) || !Number.isInteger(mon) || !Number.isInteger(day)) return null;
+
+  const parsed = new Date(y, mon - 1, day);
+  if (Number.isNaN(parsed.getTime())) return null;
+  if (parsed.getFullYear() !== y || parsed.getMonth() !== mon - 1 || parsed.getDate() !== day) return null;
+  return parsed;
+}
+
+function normalizeWeekStartKey(v: string | null | undefined): string | null {
+  const parsed = parseLocalDateKey(v);
+  if (!parsed) return null;
+  return formatLocalDateKey(startOfLocalWeek(parsed));
+}
+
+function currentWeekStartKey(): string {
+  return formatLocalDateKey(startOfLocalWeek(new Date()));
+}
+
+function formatLocalWeekKey(date: Date): string {
+  const weekStart = startOfLocalWeek(date);
+  const weekThursday = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 3);
+  const weekYear = weekThursday.getFullYear();
+  const jan4 = new Date(weekYear, 0, 4);
+  const jan4Offset = (jan4.getDay() + 6) % 7;
+  const week1Start = new Date(weekYear, 0, 4 - jan4Offset);
+  const diffDays = Math.round((startOfLocalDay(weekStart).getTime() - startOfLocalDay(week1Start).getTime()) / 86400_000);
+  const week = Math.floor(diffDays / 7) + 1;
+  return `${weekYear}-W${String(week).padStart(2, "0")}`;
+}
+
+function parseLocalWeekKey(v: string | null | undefined): Date | null {
+  const s = String(v || "").trim();
+  const m = s.match(/^(\d{4})-W(\d{2})$/i);
+  if (!m) return null;
+
+  const y = Number(m[1]);
+  const week = Number(m[2]);
+  if (!Number.isInteger(y) || !Number.isInteger(week) || week < 1 || week > 53) return null;
+
+  const jan4 = new Date(y, 0, 4);
+  const jan4Offset = (jan4.getDay() + 6) % 7;
+  const week1Start = new Date(y, 0, 4 - jan4Offset);
+  const parsed = new Date(week1Start.getTime());
+  parsed.setDate(parsed.getDate() + (week - 1) * 7);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const normalized = formatLocalWeekKey(parsed);
+  if (normalized.toUpperCase() !== `${y}-W${String(week).padStart(2, "0")}`.toUpperCase()) return null;
+  return startOfLocalWeek(parsed);
+}
+
+function normalizeWeekSelectionKey(v: string | null | undefined): string | null {
+  const dateKey = normalizeWeekStartKey(v);
+  if (dateKey) return dateKey;
+  const parsedWeek = parseLocalWeekKey(v);
+  if (!parsedWeek) return null;
+  return formatLocalDateKey(startOfLocalWeek(parsedWeek));
+}
+
+function startOfLocalMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function formatLocalMonthKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function parseLocalMonthKey(v: string | null | undefined): Date | null {
+  const s = String(v || "").trim();
+  const m = s.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return null;
+
+  const y = Number(m[1]);
+  const mon = Number(m[2]);
+  if (!Number.isInteger(y) || !Number.isInteger(mon)) return null;
+
+  const parsed = new Date(y, mon - 1, 1);
+  if (Number.isNaN(parsed.getTime())) return null;
+  if (parsed.getFullYear() !== y || parsed.getMonth() !== mon - 1) return null;
+  return parsed;
+}
+
+function normalizeMonthKey(v: string | null | undefined): string | null {
+  const parsed = parseLocalMonthKey(v);
+  if (!parsed) return null;
+  return formatLocalMonthKey(parsed);
+}
+
+function currentMonthKey(): string {
+  return formatLocalMonthKey(new Date());
+}
+
+function weekRangeLabel(start: Date): string {
+  const end = new Date(start.getTime());
+  end.setDate(end.getDate() + 6);
+  const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" });
+  return `${fmt(start)} -> ${fmt(end)}`;
+}
+
+function monthRangeLabel(start: Date): string {
+  return start.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
 function parseDayWindowMode(v: string | null | undefined): DayWindowMode {
@@ -798,8 +930,10 @@ function addMs(iso: string, deltaMs: number): string {
 async function resolveWindow(
   range: RangeKey,
   dayWindowMode: DayWindowMode,
-  _page: PageId,
-  apiBase: string
+  page: PageId,
+  apiBase: string,
+  statsWeekStart: string,
+  statsMonthKey: string
 ): Promise<TimeWindow> {
   const to = nowIso();
   if (range === "24h") {
@@ -810,8 +944,47 @@ async function resolveWindow(
     }
     return { from: addMs(to, -24 * 3600 * 1000), to };
   }
-  if (range === "1w") return { from: addMs(to, -7 * 24 * 3600 * 1000), to };
-  if (range === "1m") return { from: addMs(to, -30 * 24 * 3600 * 1000), to };
+  if (range === "1w") {
+    if (page === "stats") {
+      const now = new Date();
+      const currentWeekStart = startOfLocalWeek(now);
+      const selectedDate = parseLocalDateKey(statsWeekStart);
+      let weekStart = startOfLocalWeek(selectedDate || now);
+      if (weekStart.getTime() > currentWeekStart.getTime()) {
+        weekStart = currentWeekStart;
+      }
+
+      const weekEnd = new Date(weekStart.getTime());
+      weekEnd.setDate(weekEnd.getDate() + 7);
+      const weekTo = now.getTime() < weekEnd.getTime() ? now : weekEnd;
+
+      return {
+        from: weekStart.toISOString(),
+        to: weekTo.toISOString()
+      };
+    }
+    return { from: addMs(to, -7 * 24 * 3600 * 1000), to };
+  }
+  if (range === "1m") {
+    if (page === "stats") {
+      const now = new Date();
+      const currentMonthStart = startOfLocalMonth(now);
+      const selectedMonth = parseLocalMonthKey(statsMonthKey);
+      let monthStart = startOfLocalMonth(selectedMonth || now);
+      if (monthStart.getTime() > currentMonthStart.getTime()) {
+        monthStart = currentMonthStart;
+      }
+
+      const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+      const monthTo = now.getTime() < monthEnd.getTime() ? now : monthEnd;
+      return {
+        from: monthStart.toISOString(),
+        to: monthTo.toISOString()
+      };
+    }
+
+    return { from: addMs(to, -30 * 24 * 3600 * 1000), to };
+  }
 
   const res = await fetch(`${apiBase}/range?bucket=window`, { cache: "no-store" });
   if (!res.ok) return { from: addMs(to, -24 * 3600 * 1000), to };
@@ -1668,6 +1841,9 @@ function LegacyTimeline({
           idx: i,
           start_ts: new Date(startMs).toISOString(),
           end_ts: new Date(endMs).toISOString(),
+          active_seconds: 0,
+          afk_seconds: 0,
+          unknown_seconds: 0,
           active: 0,
           afk: 0,
           off: 0,
@@ -1821,10 +1997,14 @@ export default function App() {
   const initialTopic = parseTopicId(searchParams.get("topic"));
   const initialDayWindowMode =
     page === "dashboard" ? "midnight" : parseDayWindowMode(searchParams.get("day_window"));
+  const initialStatsWeekStart = normalizeWeekSelectionKey(searchParams.get("week_start")) || currentWeekStartKey();
+  const initialStatsMonthKey = normalizeMonthKey(searchParams.get("month")) || currentMonthKey();
 
   const [range, setRange] = useState<RangeKey>(initialRange);
   const [topic, setTopic] = useState<TopicId>(initialTopic);
   const [dayWindowMode, setDayWindowMode] = useState<DayWindowMode>(initialDayWindowMode);
+  const [statsWeekStart, setStatsWeekStart] = useState(initialStatsWeekStart);
+  const [statsMonthKey, setStatsMonthKey] = useState(initialStatsMonthKey);
   const [monitorSetupFilter, setMonitorSetupFilter] = useState<MonitorSetupFilter>("all");
   const [reloadKey, setReloadKey] = useState(0);
   const [themeMode, onThemeModeChange] = useThemeMode();
@@ -1838,7 +2018,7 @@ export default function App() {
     document.body.classList.toggle("theme-high-contrast", contrastMode === "high");
   }, [contrastMode]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof document === "undefined") return;
     document.body.classList.toggle("design-terminal", designVariant === "terminal");
   }, [designVariant]);
@@ -1909,18 +2089,30 @@ export default function App() {
     topic: TopicId;
     range: RangeKey;
     dayWindowMode: DayWindowMode;
+    statsWeekStart: string;
+    statsMonthKey: string;
     reloadKey: number;
     autotagRunId: string;
     apiBase: string;
   } | null>(null);
 
-  function replaceQuery(nextRange: RangeKey, nextTopic: TopicId, nextDayWindowMode: DayWindowMode): void {
+  function replaceQuery(
+    nextRange: RangeKey,
+    nextTopic: TopicId,
+    nextDayWindowMode: DayWindowMode,
+    nextStatsWeekStart: string,
+    nextStatsMonthKey: string
+  ): void {
     const params = new URLSearchParams(String(window.location.search || ""));
     params.set("range", nextRange);
     if (page === "stats") params.set("topic", nextTopic);
     else params.delete("topic");
     if (nextRange === "24h" && nextDayWindowMode === "midnight") params.set("day_window", "midnight");
     else params.delete("day_window");
+    if (page === "stats" && nextRange === "1w") params.set("week_start", nextStatsWeekStart);
+    else params.delete("week_start");
+    if (page === "stats" && nextRange === "1m") params.set("month", nextStatsMonthKey);
+    else params.delete("month");
     const query = params.toString();
     const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}`;
     window.history.replaceState(null, "", nextUrl);
@@ -1928,17 +2120,30 @@ export default function App() {
 
   function onRangeChange(next: RangeKey): void {
     setRange(next);
-    replaceQuery(next, topic, dayWindowMode);
+    replaceQuery(next, topic, dayWindowMode, statsWeekStart, statsMonthKey);
   }
 
   function onTopicChange(next: TopicId): void {
     setTopic(next);
-    replaceQuery(range, next, dayWindowMode);
+    replaceQuery(range, next, dayWindowMode, statsWeekStart, statsMonthKey);
   }
 
   function onDayWindowModeChange(next: DayWindowMode): void {
     setDayWindowMode(next);
-    replaceQuery(range, topic, next);
+    replaceQuery(range, topic, next, statsWeekStart, statsMonthKey);
+  }
+
+  function onStatsWeekChange(next: string): void {
+    const normalized = normalizeWeekSelectionKey(next);
+    if (!normalized) return;
+    setStatsWeekStart(normalized);
+    replaceQuery(range, topic, dayWindowMode, normalized, statsMonthKey);
+  }
+
+  function onStatsMonthChange(next: string): void {
+    const normalized = normalizeMonthKey(next) || currentMonthKey();
+    setStatsMonthKey(normalized);
+    replaceQuery(range, topic, dayWindowMode, statsWeekStart, normalized);
   }
 
   function hrefFor(target: PageId): string {
@@ -1946,6 +2151,8 @@ export default function App() {
     params.set("range", range);
     if (target === "stats") params.set("topic", topic);
     if (range === "24h" && dayWindowMode === "midnight") params.set("day_window", "midnight");
+    if (target === "stats" && range === "1w") params.set("week_start", statsWeekStart);
+    if (target === "stats" && range === "1m") params.set("month", statsMonthKey);
     const qs = params.toString();
     if (target === "dashboard") return `${uiBase}${qs ? `?${qs}` : ""}`;
     if (target === "stats") return `${uiBase}/stats${qs ? `?${qs}` : ""}`;
@@ -2006,6 +2213,8 @@ export default function App() {
       previousLoad.topic === topic &&
       previousLoad.range === range &&
       previousLoad.dayWindowMode === dayWindowMode &&
+      previousLoad.statsWeekStart === statsWeekStart &&
+      previousLoad.statsMonthKey === statsMonthKey &&
       previousLoad.reloadKey === reloadKey &&
       previousLoad.apiBase === apiBase &&
       previousLoad.autotagRunId !== autotagRunId;
@@ -2020,6 +2229,8 @@ export default function App() {
       topic,
       range,
       dayWindowMode,
+      statsWeekStart,
+      statsMonthKey,
       reloadKey,
       autotagRunId,
       apiBase
@@ -2039,7 +2250,7 @@ export default function App() {
         let summaryQuery = "";
         if (!(requested.size === 1 && requested.has("autotag"))) {
           const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
-          const timeWindow = await resolveWindow(range, effectiveDayWindowMode, page, apiBase);
+          const timeWindow = await resolveWindow(range, effectiveDayWindowMode, page, apiBase, statsWeekStart, statsMonthKey);
           if (cancelled || loadId !== activeLoadId) return;
           setWindowRange(timeWindow);
 
@@ -2266,7 +2477,7 @@ export default function App() {
       cancelled = true;
       if (timer != null) window.clearInterval(timer);
     };
-  }, [page, topic, range, dayWindowMode, reloadKey, autotagRunId, apiBase]);
+  }, [page, topic, range, dayWindowMode, statsWeekStart, statsMonthKey, reloadKey, autotagRunId, apiBase]);
 
   useEffect(() => {
     const runId = String(autotagGenerated?.run_id || "");
@@ -3454,11 +3665,21 @@ export default function App() {
   const statusBadge = page === "settings" ? "settings" : loading ? "syncing" : error ? "degraded" : "healthy";
   const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
   const showTodayNowMarker = page === "dashboard" && range === "24h" && effectiveDayWindowMode === "midnight";
+  const selectedStatsWeekStart = startOfLocalWeek(parseLocalDateKey(statsWeekStart) || new Date());
+  const selectedStatsMonthStart = startOfLocalMonth(parseLocalMonthKey(statsMonthKey) || new Date());
+  const statsWeekInputValue = formatLocalWeekKey(selectedStatsWeekStart);
+  const statsWeekInputMax = formatLocalWeekKey(new Date());
+  const statsWeekLabel = weekRangeLabel(selectedStatsWeekStart);
+  const statsMonthLabel = monthRangeLabel(selectedStatsMonthStart);
   const rangeLabel =
     range === "24h"
       ? effectiveDayWindowMode === "midnight"
         ? "24h (00:00 -> jetzt)"
         : "24h (-24h -> jetzt)"
+      : page === "stats" && range === "1w"
+        ? `1w (${statsWeekLabel})`
+      : page === "stats" && range === "1m"
+        ? `1m (${statsMonthLabel})`
       : range;
 
   return (
@@ -3518,6 +3739,30 @@ export default function App() {
                   {mode.label}
                 </button>
               ))}
+            </div>
+          ) : null}
+          {page === "stats" && range === "1w" ? (
+            <div className="controls" style={{ marginTop: 7 }}>
+              <input
+                type="week"
+                className="timersSelect statsCalendarInput"
+                value={statsWeekInputValue}
+                max={statsWeekInputMax}
+                onChange={(e) => onStatsWeekChange(e.target.value)}
+                aria-label="stats week"
+              />
+            </div>
+          ) : null}
+          {page === "stats" && range === "1m" ? (
+            <div className="controls" style={{ marginTop: 7 }}>
+              <input
+                type="month"
+                className="timersSelect statsCalendarInput"
+                value={statsMonthKey}
+                max={currentMonthKey()}
+                onChange={(e) => onStatsMonthChange(e.target.value)}
+                aria-label="stats month"
+              />
             </div>
           ) : null}
         </div>

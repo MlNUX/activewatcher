@@ -824,6 +824,55 @@ body.design-terminal .timersSelect option {
   background: var(--bg0);
 }
 
+body.design-terminal .statsCalendarInput {
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 0;
+  border-color: var(--line);
+  background: linear-gradient(180deg, rgba(0, 255, 65, 0.03), rgba(0, 255, 65, 0.01));
+  box-shadow: none;
+  color: var(--ink);
+  color-scheme: dark;
+  padding-right: 32px;
+}
+
+body.design-terminal .statsCalendarInput:hover {
+  border-color: var(--line-strong);
+  background: rgba(0, 255, 65, 0.05);
+}
+
+body.design-terminal .statsCalendarInput:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.2);
+}
+
+body.design-terminal .statsCalendarInput::-webkit-datetime-edit,
+body.design-terminal .statsCalendarInput::-webkit-datetime-edit-fields-wrapper,
+body.design-terminal .statsCalendarInput::-webkit-datetime-edit-week-field,
+body.design-terminal .statsCalendarInput::-webkit-datetime-edit-month-field,
+body.design-terminal .statsCalendarInput::-webkit-datetime-edit-year-field {
+  color: var(--ink);
+}
+
+body.design-terminal .statsCalendarInput::-webkit-datetime-edit-text {
+  color: var(--muted);
+}
+
+body.design-terminal .statsCalendarInput::-webkit-calendar-picker-indicator {
+  opacity: 0.82;
+  filter: brightness(1.16) sepia(1) hue-rotate(56deg) saturate(5.4);
+  cursor: pointer;
+}
+
+body.design-terminal .statsCalendarInput:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
+}
+
+body.design-terminal .statsCalendarInput::-webkit-clear-button,
+body.design-terminal .statsCalendarInput::-webkit-inner-spin-button {
+  display: none;
+}
+
 body.design-terminal .timersHint,
 body.design-terminal .timersEmpty {
   border: 1px dashed var(--line);

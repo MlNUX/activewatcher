@@ -15,11 +15,17 @@
         const contrast = String(window.localStorage.getItem("aw.ui.contrast") || "")
           .trim()
           .toLowerCase();
+        const design = String(window.localStorage.getItem("aw.ui.design") || "")
+          .trim()
+          .toLowerCase();
         if (mode === "light" || mode === "white") {
           document.body.classList.add("theme-light");
         }
         if (contrast === "high" || contrast === "high-contrast") {
           document.body.classList.add("theme-high-contrast");
+        }
+        if (design === "terminal") {
+          document.body.classList.add("design-terminal");
         }
       } catch {}
     </script>
