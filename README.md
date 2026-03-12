@@ -83,6 +83,28 @@ The UI includes top-level tabs: `dashboard`, `stats`, `timers`, `settings`.
 - Settings can be exported/imported and reset to defaults.
 - Preferences are saved in browser local storage (for example `aw.ui.theme`).
 
+## Terminal Dashboard (btop-style)
+
+Run an interactive terminal dashboard directly in your shell:
+
+```bash
+activewatcher dashboard --server-url http://127.0.0.1:8712
+```
+
+Optional flags:
+
+- `--refresh-seconds 1.0`
+- `--range 24h|1w|1m|all`
+- `--day-window midnight|rolling`
+
+Controls in the dashboard:
+
+- `q`: quit
+- `r`: refresh now
+- `1/2/3/4`: switch range (`24h`, `1w`, `1m`, `all`)
+- `m`: toggle `day-window` mode (`midnight`/`rolling`)
+- `h`: show/hide help
+
 ## Browser Plugins
 
 Paths:
