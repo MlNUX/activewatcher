@@ -22,7 +22,9 @@ def socket2_path() -> str:
         cand = sorted(pathlib.Path(xdg, "hypr").glob("*/.socket2.sock"))
         if cand:
             return str(cand[-1])
-    raise RuntimeError("Hyprland socket2 not found (need HYPRLAND_INSTANCE_SIGNATURE + XDG_RUNTIME_DIR)")
+    raise RuntimeError(
+        "Hyprland socket2 not found (need HYPRLAND_INSTANCE_SIGNATURE + XDG_RUNTIME_DIR)"
+    )
 
 
 def socket1_path_from_socket2(socket2: str) -> str:
@@ -65,7 +67,9 @@ async def _hypr_socket_json(socket1: str, command: str) -> Any:
             try:
                 return json.loads(text)
             except json.JSONDecodeError:
-                last_error = RuntimeError(f"invalid Hyprland IPC JSON for {command}: {text[:200]}")
+                last_error = RuntimeError(
+                    f"invalid Hyprland IPC JSON for {command}: {text[:200]}"
+                )
                 continue
         except Exception as e:
             last_error = e
@@ -142,11 +146,15 @@ def _pick_monitor(
     if not monitors:
         return None
     if monitor_id is not None:
-        mon = next((m for m in monitors if _monitor_id(m.get("id")) == monitor_id), None)
+        mon = next(
+            (m for m in monitors if _monitor_id(m.get("id")) == monitor_id), None
+        )
         if mon:
             return mon
     if monitor_name:
-        mon = next((m for m in monitors if str(m.get("name") or "") == monitor_name), None)
+        mon = next(
+            (m for m in monitors if str(m.get("name") or "") == monitor_name), None
+        )
         if mon:
             return mon
     return _pick_focused_monitor(monitors)
@@ -175,7 +183,9 @@ def _workspace_payload(
     workspace_id = _ws_id(active_ws)
 
     monitor_name = str(active_ws.get("monitor") or "") or None
-    monitor_id = _monitor_id(active_ws.get("monitorID")) or _monitor_id(active_ws.get("monitor"))
+    monitor_id = _monitor_id(active_ws.get("monitorID")) or _monitor_id(
+        active_ws.get("monitor")
+    )
     mon = _pick_monitor(monitors, monitor_name=monitor_name, monitor_id=monitor_id)
     if mon:
         monitor_name = monitor_name or str(mon.get("name") or "") or None
@@ -319,7 +329,9 @@ async def _get_focused_state(
 
 
 def _pick_focused_monitor(monitors: list[dict[str, Any]]) -> dict[str, Any] | None:
-    return next((m for m in monitors if m.get("focused")), None) or (monitors[0] if monitors else None)
+    return next((m for m in monitors if m.get("focused")), None) or (
+        monitors[0] if monitors else None
+    )
 
 
 def _client_visible_on_monitor(
@@ -456,8 +468,10 @@ class HyprlandWatcher:
         now = time.monotonic()
         now_dt = datetime.now(timezone.utc)
         ts = now_dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        ts_end = (now_dt + timedelta(milliseconds=1)).isoformat(timespec="milliseconds").replace(
-            "+00:00", "Z"
+        ts_end = (
+            (now_dt + timedelta(milliseconds=1))
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
         )
 
         monitors: list[dict[str, Any]] | None = None
@@ -486,6 +500,7 @@ class HyprlandWatcher:
         next_focused_state: dict[str, Any] | None = None
         next_focused_state_json: str | None = None
         focused_should_send = False
+        focused_state_available = False
         if self.track_focused:
             try:
                 next_focused_state = await _get_focused_state(
@@ -493,15 +508,28 @@ class HyprlandWatcher:
                     title_max_len=self.title_max_len,
                     monitors=monitors,
                 )
+                focused_state_available = True
             except Exception as e:
                 print(f"[hyprland] focused state fetch failed: {e}")
-                return
-            next_focused_state_json = _canonical_json(next_focused_state)
-            focused_should_send = force or next_focused_state_json != self._last_focused_sent_state
-            if self.heartbeat_seconds > 0 and (now - self._last_focused_sent_at) >= self.heartbeat_seconds:
-                focused_should_send = True
-            if focused_should_send:
-                payloads.append({"bucket": "window", "source": self.source, "ts": ts, "data": next_focused_state})
+            if focused_state_available and next_focused_state is not None:
+                next_focused_state_json = _canonical_json(next_focused_state)
+                focused_should_send = (
+                    force or next_focused_state_json != self._last_focused_sent_state
+                )
+                if (
+                    self.heartbeat_seconds > 0
+                    and (now - self._last_focused_sent_at) >= self.heartbeat_seconds
+                ):
+                    focused_should_send = True
+                if focused_should_send:
+                    payloads.append(
+                        {
+                            "bucket": "window",
+                            "source": self.source,
+                            "ts": ts,
+                            "data": next_focused_state,
+                        }
+                    )
 
         workspace_state: dict[str, Any] | None = None
         workspace_key: str | None = None
@@ -510,7 +538,9 @@ class HyprlandWatcher:
         workspace_payload: dict[str, Any] | None = None
         if self.track_workspaces:
             try:
-                active_ws_raw = await _hypr_socket_json(self._socket1_path, "activeworkspace")
+                active_ws_raw = await _hypr_socket_json(
+                    self._socket1_path, "activeworkspace"
+                )
                 if isinstance(active_ws_raw, dict):
                     workspace_state, workspace_key = _workspace_payload(
                         active_ws=active_ws_raw,
@@ -525,7 +555,10 @@ class HyprlandWatcher:
             if workspace_key is not None:
                 workspace_key_changed = workspace_key != self._last_workspace_key
                 workspace_should_send = force or workspace_key_changed
-                if self.heartbeat_seconds > 0 and (now - self._last_workspace_sent_at) >= self.heartbeat_seconds:
+                if (
+                    self.heartbeat_seconds > 0
+                    and (now - self._last_workspace_sent_at) >= self.heartbeat_seconds
+                ):
                     workspace_should_send = True
 
             if workspace_should_send and workspace_state is not None:
@@ -534,14 +567,30 @@ class HyprlandWatcher:
                     if self._last_workspace_state:
                         workspace_payload.update(
                             {
-                                "prev_workspace": self._last_workspace_state.get("workspace"),
-                                "prev_workspace_id": self._last_workspace_state.get("workspace_id"),
-                                "prev_monitor": self._last_workspace_state.get("monitor"),
-                                "prev_monitor_id": self._last_workspace_state.get("monitor_id"),
-                                "prev_monitor_count": self._last_workspace_state.get("monitor_count"),
-                                "prev_monitor_setup": self._last_workspace_state.get("monitor_setup"),
-                                "prev_connected_monitors": self._last_workspace_state.get("connected_monitors"),
-                                "prev_monitor_signature": self._last_workspace_state.get("monitor_signature"),
+                                "prev_workspace": self._last_workspace_state.get(
+                                    "workspace"
+                                ),
+                                "prev_workspace_id": self._last_workspace_state.get(
+                                    "workspace_id"
+                                ),
+                                "prev_monitor": self._last_workspace_state.get(
+                                    "monitor"
+                                ),
+                                "prev_monitor_id": self._last_workspace_state.get(
+                                    "monitor_id"
+                                ),
+                                "prev_monitor_count": self._last_workspace_state.get(
+                                    "monitor_count"
+                                ),
+                                "prev_monitor_setup": self._last_workspace_state.get(
+                                    "monitor_setup"
+                                ),
+                                "prev_connected_monitors": self._last_workspace_state.get(
+                                    "connected_monitors"
+                                ),
+                                "prev_monitor_signature": self._last_workspace_state.get(
+                                    "monitor_signature"
+                                ),
                             }
                         )
                 else:
@@ -559,21 +608,35 @@ class HyprlandWatcher:
                 if workspace_key_changed and self._last_workspace_state:
                     switch_payload = {
                         "from_workspace": self._last_workspace_state.get("workspace"),
-                        "from_workspace_id": self._last_workspace_state.get("workspace_id"),
+                        "from_workspace_id": self._last_workspace_state.get(
+                            "workspace_id"
+                        ),
                         "from_monitor": self._last_workspace_state.get("monitor"),
                         "from_monitor_id": self._last_workspace_state.get("monitor_id"),
-                        "from_monitor_count": self._last_workspace_state.get("monitor_count"),
-                        "from_monitor_setup": self._last_workspace_state.get("monitor_setup"),
-                        "from_connected_monitors": self._last_workspace_state.get("connected_monitors"),
-                        "from_monitor_signature": self._last_workspace_state.get("monitor_signature"),
+                        "from_monitor_count": self._last_workspace_state.get(
+                            "monitor_count"
+                        ),
+                        "from_monitor_setup": self._last_workspace_state.get(
+                            "monitor_setup"
+                        ),
+                        "from_connected_monitors": self._last_workspace_state.get(
+                            "connected_monitors"
+                        ),
+                        "from_monitor_signature": self._last_workspace_state.get(
+                            "monitor_signature"
+                        ),
                         "to_workspace": workspace_state.get("workspace"),
                         "to_workspace_id": workspace_state.get("workspace_id"),
                         "to_monitor": workspace_state.get("monitor"),
                         "to_monitor_id": workspace_state.get("monitor_id"),
                         "to_monitor_count": workspace_state.get("monitor_count"),
                         "to_monitor_setup": workspace_state.get("monitor_setup"),
-                        "to_connected_monitors": workspace_state.get("connected_monitors"),
-                        "to_monitor_signature": workspace_state.get("monitor_signature"),
+                        "to_connected_monitors": workspace_state.get(
+                            "connected_monitors"
+                        ),
+                        "to_monitor_signature": workspace_state.get(
+                            "monitor_signature"
+                        ),
                         "monitor_count": workspace_state.get("monitor_count"),
                         "monitor_setup": workspace_state.get("monitor_setup"),
                         "connected_monitors": workspace_state.get("connected_monitors"),
@@ -633,7 +696,9 @@ class HyprlandWatcher:
                         active_ws_label=active_ws_label,
                     ):
                         continue
-                    data = _window_payload_data(c, title_max_len=self.title_max_len, monitor_name=mon_name)
+                    data = _window_payload_data(
+                        c, title_max_len=self.title_max_len, monitor_name=mon_name
+                    )
                     if not data:
                         continue
                     current_visible[str(data["address"])] = data
@@ -709,7 +774,9 @@ class HyprlandWatcher:
                 self._last_focused_state = next_focused_state
             return
 
-        sent_visible_payload = any(p.get("bucket") == "window_visible" for p in payloads)
+        sent_visible_payload = any(
+            p.get("bucket") == "window_visible" for p in payloads
+        )
         sent_apps_payload = any(p.get("bucket") == "app_open" for p in payloads)
         sent_workspace_payload = any(p.get("bucket") == "workspace" for p in payloads)
 
@@ -726,7 +793,9 @@ class HyprlandWatcher:
 
         if self.track_visible_windows and sent_visible_payload:
             self._visible_sent_state = next_visible_sent_state
-        if self.track_visible_windows and (sent_visible_payload or visible_should_force):
+        if self.track_visible_windows and (
+            sent_visible_payload or visible_should_force
+        ):
             self._last_visible_sent_at = now
 
         if self.track_open_apps and sent_apps_payload:

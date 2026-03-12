@@ -287,6 +287,8 @@ type LoadKey =
 
 const DEFAULT_REFRESH_MS = 30_000;
 const ALL_RANGE_REFRESH_MS = 120_000;
+const EVENTS_CHUNK_MS = 7 * 24 * 3600 * 1000;
+const EVENTS_MAX_CHUNKS = 48;
 
 const RANGES: Array<{ key: RangeKey; label: string }> = [
   { key: "24h", label: "24h" },
@@ -919,6 +921,66 @@ function qs(window: TimeWindow): string {
   return p.toString();
 }
 
+function parseTimeWindow(window: TimeWindow): { fromMs: number; toMs: number } | null {
+  const fromMs = Date.parse(window.from);
+  const toMs = Date.parse(window.to);
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs <= fromMs) return null;
+  return { fromMs, toMs };
+}
+
+function splitTimeWindow(window: TimeWindow, targetChunkMs: number): TimeWindow[] {
+  const parsed = parseTimeWindow(window);
+  if (!parsed) return [window];
+
+  const chunkMs = Math.max(60_000, Math.round(targetChunkMs));
+  const out: TimeWindow[] = [];
+  for (let cursor = parsed.fromMs; cursor < parsed.toMs; cursor += chunkMs) {
+    const end = Math.min(parsed.toMs, cursor + chunkMs);
+    out.push({ from: new Date(cursor).toISOString(), to: new Date(end).toISOString() });
+  }
+  return out.length ? out : [window];
+}
+
+function eventDedupeKey(event: ApiEvent): string {
+  if (typeof event.id === "number") return `id:${event.id}`;
+  const dataJson = JSON.stringify(event.data || {});
+  return `${event.source || ""}|${event.start_ts}|${event.end_ts}|${dataJson}`;
+}
+
+async function fetchEventsBucketChunked(apiBase: string, bucket: string, window: TimeWindow): Promise<ApiEvent[]> {
+  const parsed = parseTimeWindow(window);
+  if (!parsed) {
+    const value = await fetchJson<EventsResponse>(`${apiBase}/events?bucket=${encodeURIComponent(bucket)}&${qs(window)}`);
+    return Array.isArray(value.events) ? value.events : [];
+  }
+
+  const durationMs = parsed.toMs - parsed.fromMs;
+  let chunkMs = EVENTS_CHUNK_MS;
+  const minChunkMsByCount = Math.ceil(durationMs / EVENTS_MAX_CHUNKS);
+  if (minChunkMsByCount > chunkMs) chunkMs = minChunkMsByCount;
+
+  const chunks = splitTimeWindow(window, chunkMs);
+  const rows: ApiEvent[] = [];
+  const seen = new Set<string>();
+
+  for (const chunk of chunks) {
+    const value = await fetchJson<EventsResponse>(`${apiBase}/events?bucket=${encodeURIComponent(bucket)}&${qs(chunk)}`);
+    const events = Array.isArray(value.events) ? value.events : [];
+    for (const event of events) {
+      const key = eventDedupeKey(event);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(event);
+    }
+  }
+
+  rows.sort((a, b) => {
+    if (a.start_ts === b.start_ts) return String(a.end_ts || "").localeCompare(String(b.end_ts || ""));
+    return String(a.start_ts || "").localeCompare(String(b.start_ts || ""));
+  });
+  return rows;
+}
+
 function parseIdList(raw: string): string[] {
   const parts = String(raw || "").split(/[\n,]/g);
   const out: string[] = [];
@@ -945,6 +1007,7 @@ async function resolveWindow(
   range: RangeKey,
   dayWindowMode: DayWindowMode,
   page: PageId,
+  topic: TopicId,
   apiBase: string,
   statsDayKey: string,
   statsWeekStart: string,
@@ -1016,7 +1079,29 @@ async function resolveWindow(
     return { from: addMs(to, -30 * 24 * 3600 * 1000), to };
   }
 
-  const res = await fetch(`${apiBase}/range?bucket=window`, { cache: "no-store" });
+  let rangeBucket: string | null = null;
+  if (page === "dashboard") {
+    rangeBucket = "window";
+  } else if (page === "stats") {
+    if (topic === "overview" || topic === "apps" || topic === "categories" || topic === "websites") {
+      rangeBucket = "window";
+    } else if (topic === "workspaces" || topic === "monitors") {
+      rangeBucket = "workspace";
+    } else if (topic === "system") {
+      rangeBucket = "system";
+    } else if (topic === "tabs") {
+      rangeBucket = "browser_tabs";
+    } else if (topic === "logs") {
+      rangeBucket = "window_visible";
+    } else {
+      rangeBucket = null;
+    }
+  }
+
+  const rangeUrl = rangeBucket
+    ? `${apiBase}/range?bucket=${encodeURIComponent(rangeBucket)}`
+    : `${apiBase}/range`;
+  const res = await fetch(rangeUrl, { cache: "no-store" });
   if (!res.ok) return { from: addMs(to, -24 * 3600 * 1000), to };
   const data = (await res.json()) as { empty?: boolean; from_ts?: string };
   const from = data.empty || !data.from_ts ? addMs(to, -24 * 3600 * 1000) : data.from_ts;
@@ -2294,12 +2379,14 @@ export default function App() {
       try {
         let query = "";
         let summaryQuery = "";
+        let timeWindow: TimeWindow | null = null;
         if (!(requested.size === 1 && requested.has("autotag"))) {
           const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
-          const timeWindow = await resolveWindow(
+          timeWindow = await resolveWindow(
             range,
             effectiveDayWindowMode,
             page,
+            topic,
             apiBase,
             statsDayKey,
             statsWeekStart,
@@ -2325,12 +2412,7 @@ export default function App() {
 
           const pending: Array<Promise<void>> = [];
 
-          function queue<T>(
-            label: string,
-            url: string,
-            apply: (value: T) => void,
-            applyErrorFallback: () => void
-          ): void {
+          function queue<T>(label: string, url: string, apply: (value: T) => void): void {
             const p = fetchJson<T>(url)
               .then((value) => {
                 if (cancelled || loadId !== activeLoadId) return;
@@ -2338,8 +2420,26 @@ export default function App() {
               })
               .catch((e) => {
                 errors.push(`${label}: ${String(e)}`);
+              });
+            pending.push(p);
+          }
+
+          function queueEvents(
+            label: string,
+            bucket: string,
+            apply: (events: ApiEvent[]) => void
+          ): void {
+            if (!timeWindow) {
+              errors.push(`${label}: missing time window`);
+              return;
+            }
+            const p = fetchEventsBucketChunked(apiBase, bucket, timeWindow)
+              .then((events) => {
                 if (cancelled || loadId !== activeLoadId) return;
-                applyErrorFallback();
+                apply(events);
+              })
+              .catch((e) => {
+                errors.push(`${label}: ${String(e)}`);
               });
             pending.push(p);
           }
@@ -2348,16 +2448,14 @@ export default function App() {
             queue<SummaryResponse>(
               "summary",
               `${apiBase}/summary?${summaryQuery}&include_timeline=false`,
-              (value) => setSummary(value),
-              () => setSummary(null)
+              (value) => setSummary(value)
             );
           }
           if (keys.has("categories")) {
             queue<CategoriesResponse>(
               "categories",
               `${apiBase}/categories?mode=auto&${query}`,
-              (value) => setCategories(value),
-              () => setCategories(null)
+              (value) => setCategories(value)
             );
           }
           if (keys.has("autotag")) {
@@ -2388,8 +2486,6 @@ export default function App() {
                   setAutotagDecisions(decisionsValue);
                 } catch (e) {
                   errors.push(`autotag decisions: ${String(e)}`);
-                  if (cancelled || loadId !== activeLoadId) return;
-                  setAutotagDecisions(null);
                 }
 
                 const generatedUrl = `${apiBase}/autotag/generated?run_id=${encodeURIComponent(selectedRunId)}`;
@@ -2399,65 +2495,53 @@ export default function App() {
                   setAutotagGenerated(generatedValue);
                 } catch (e) {
                   errors.push(`autotag generated: ${String(e)}`);
-                  if (cancelled || loadId !== activeLoadId) return;
-                  setAutotagGenerated(null);
                 }
               })
               .catch((e) => {
                 errors.push(`autotag runs: ${String(e)}`);
-                if (cancelled || loadId !== activeLoadId) return;
-                setAutotagRuns([]);
-                setAutotagDecisions(null);
-                setAutotagGenerated(null);
               });
             pending.push(p);
           }
           if (keys.has("window")) {
-            queue<EventsResponse>(
+            queueEvents(
               "window",
-              `${apiBase}/events?bucket=window&${query}`,
-              (value) => setWindowEvents(Array.isArray(value.events) ? value.events : []),
-              () => setWindowEvents([])
+              "window",
+              (events) => setWindowEvents(events)
             );
           }
           if (keys.has("workspace")) {
-            queue<EventsResponse>(
+            queueEvents(
               "workspace",
-              `${apiBase}/events?bucket=workspace&${query}`,
-              (value) => setWorkspaceEvents(Array.isArray(value.events) ? value.events : []),
-              () => setWorkspaceEvents([])
+              "workspace",
+              (events) => setWorkspaceEvents(events)
             );
           }
           if (keys.has("workspace_switch")) {
-            queue<EventsResponse>(
+            queueEvents(
               "workspace_switch",
-              `${apiBase}/events?bucket=workspace_switch&${query}`,
-              (value) => setWorkspaceSwitchEvents(Array.isArray(value.events) ? value.events : []),
-              () => setWorkspaceSwitchEvents([])
+              "workspace_switch",
+              (events) => setWorkspaceSwitchEvents(events)
             );
           }
           if (keys.has("system")) {
-            queue<EventsResponse>(
+            queueEvents(
               "system",
-              `${apiBase}/events?bucket=system&${query}`,
-              (value) => setSystemEvents(Array.isArray(value.events) ? value.events : []),
-              () => setSystemEvents([])
+              "system",
+              (events) => setSystemEvents(events)
             );
           }
           if (keys.has("browser_tabs")) {
-            queue<EventsResponse>(
+            queueEvents(
               "browser_tabs",
-              `${apiBase}/events?bucket=browser_tabs&${query}`,
-              (value) => setTabsEvents(Array.isArray(value.events) ? value.events : []),
-              () => setTabsEvents([])
+              "browser_tabs",
+              (events) => setTabsEvents(events)
             );
           }
           if (keys.has("window_visible")) {
-            queue<EventsResponse>(
+            queueEvents(
               "window_visible",
-              `${apiBase}/events?bucket=window_visible&${query}`,
-              (value) => setVisibleEvents(Array.isArray(value.events) ? value.events : []),
-              () => setVisibleEvents([])
+              "window_visible",
+              (events) => setVisibleEvents(events)
             );
           }
 

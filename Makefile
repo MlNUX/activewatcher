@@ -4,7 +4,7 @@ PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PY := $(VENV_DIR)/bin/python
 
-.PHONY: venv pip-update pip-build frontend-build build
+.PHONY: venv pip-update pip-build frontend-build build test coverage
 
 venv:
 	@if [[ ! -x "$(VENV_PY)" ]]; then \
@@ -21,3 +21,12 @@ frontend-build:
 	./scripts/build_frontend.sh
 
 build: pip-build frontend-build
+
+test: pip-build
+	"$(VENV_PY)" -m unittest discover -s tests -v
+
+coverage: pip-build
+	"$(VENV_PY)" -m pip install coverage
+	"$(VENV_PY)" -m coverage erase
+	"$(VENV_PY)" -m coverage run -m unittest discover -s tests
+	"$(VENV_PY)" -m coverage report
