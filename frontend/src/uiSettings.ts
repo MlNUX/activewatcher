@@ -8,6 +8,7 @@ export type UiSettingsSnapshot = {
   designVariant: DesignVariant;
   timerNotifications: boolean;
   timerSound: boolean;
+  apiWriteToken: string;
 };
 
 const KEY_THEME_MODE = "aw.ui.theme";
@@ -15,12 +16,14 @@ const KEY_CONTRAST_MODE = "aw.ui.contrast";
 const KEY_DESIGN_VARIANT = "aw.ui.design";
 const KEY_TIMER_NOTIFICATIONS = "aw.timer.notifications";
 const KEY_TIMER_SOUND = "aw.timer.sound";
+const KEY_API_WRITE_TOKEN = "aw.api.writeToken";
 const IMPORT_KEYS = new Set([
   "themeMode",
   "contrastMode",
   "designVariant",
   "timerNotifications",
-  "timerSound"
+  "timerSound",
+  "apiWriteToken"
 ]);
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -31,7 +34,8 @@ export const DEFAULT_UI_SETTINGS: UiSettingsSnapshot = {
   contrastMode: "normal",
   designVariant: "default",
   timerNotifications: false,
-  timerSound: false
+  timerSound: false,
+  apiWriteToken: ""
 };
 
 function localStorageSafe(): Storage | null {
@@ -152,6 +156,11 @@ function parseBooleanFromImport(
   throw new Error(`${fieldName} must be a boolean`);
 }
 
+function parseStringFromImport(value: unknown, fallback: string): string {
+  if (typeof value === "undefined") return fallback;
+  return String(value || "").trim();
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("settings import must be a JSON object");
@@ -199,13 +208,22 @@ export function setTimerSoundEnabled(enabled: boolean): void {
   writeBoolean(KEY_TIMER_SOUND, enabled);
 }
 
+export function getApiWriteToken(): string {
+  return readString(KEY_API_WRITE_TOKEN);
+}
+
+export function setApiWriteToken(token: string): void {
+  writeString(KEY_API_WRITE_TOKEN, String(token || "").trim());
+}
+
 export function getUiSettingsSnapshot(): UiSettingsSnapshot {
   return {
     themeMode: getThemeMode(),
     contrastMode: getContrastMode(),
     designVariant: getDesignVariant(),
     timerNotifications: getTimerNotificationsEnabled(),
-    timerSound: getTimerSoundEnabled()
+    timerSound: getTimerSoundEnabled(),
+    apiWriteToken: getApiWriteToken()
   };
 }
 
@@ -224,7 +242,8 @@ export function applyUiSettingsSnapshot(input: unknown): UiSettingsSnapshot {
       current.timerNotifications,
       "timerNotifications"
     ),
-    timerSound: parseBooleanFromImport(payload.timerSound, current.timerSound, "timerSound")
+    timerSound: parseBooleanFromImport(payload.timerSound, current.timerSound, "timerSound"),
+    apiWriteToken: parseStringFromImport(payload.apiWriteToken, current.apiWriteToken)
   };
 
   setThemeMode(next.themeMode);
@@ -232,6 +251,7 @@ export function applyUiSettingsSnapshot(input: unknown): UiSettingsSnapshot {
   setDesignVariant(next.designVariant);
   setTimerNotificationsEnabled(next.timerNotifications);
   setTimerSoundEnabled(next.timerSound);
+  setApiWriteToken(next.apiWriteToken);
 
   return getUiSettingsSnapshot();
 }
@@ -242,5 +262,6 @@ export function resetUiSettings(): UiSettingsSnapshot {
   setDesignVariant(DEFAULT_UI_SETTINGS.designVariant);
   setTimerNotificationsEnabled(DEFAULT_UI_SETTINGS.timerNotifications);
   setTimerSoundEnabled(DEFAULT_UI_SETTINGS.timerSound);
+  setApiWriteToken(DEFAULT_UI_SETTINGS.apiWriteToken);
   return getUiSettingsSnapshot();
 }

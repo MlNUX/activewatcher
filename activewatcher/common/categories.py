@@ -73,7 +73,9 @@ class CategoryCatalog:
         host = _host_from_url(url_norm)
         base = _base_domain(host)
         domain = base or host
-        return self._classify(app=app_norm, title=title_norm, domain=domain, url=url_norm)
+        return self._classify(
+            app=app_norm, title=title_norm, domain=domain, url=url_norm
+        )
 
     def _classify(self, *, app: str, title: str, domain: str, url: str) -> str:
         fallback = self.rules[-1].id if self.rules else "other"
@@ -109,7 +111,9 @@ def _compile_regex_list(raw: Any) -> tuple[re.Pattern[str], ...]:
     return tuple(out)
 
 
-def _matches(rule: CategoryRule, *, app: str, title: str, domain: str, url: str) -> bool:
+def _matches(
+    rule: CategoryRule, *, app: str, title: str, domain: str, url: str
+) -> bool:
     if app and any(token in app for token in rule.apps):
         return True
     if domain and any(_domain_match(domain, token) for token in rule.domains):
@@ -254,8 +258,22 @@ def _default_rule_items() -> list[dict[str, Any]]:
             "id": "ops",
             "label": "Ops",
             "color": "#f59e0b",
-            "apps": ["kitty", "alacritty", "wezterm", "gnome-terminal", "konsole", "docker", "k9s"],
-            "domains": ["grafana", "prometheus", "kibana", "cloudflare.com", "console.aws.amazon.com"],
+            "apps": [
+                "kitty",
+                "alacritty",
+                "wezterm",
+                "gnome-terminal",
+                "konsole",
+                "docker",
+                "k9s",
+            ],
+            "domains": [
+                "grafana",
+                "prometheus",
+                "kibana",
+                "cloudflare.com",
+                "console.aws.amazon.com",
+            ],
             "titles": ["ssh", "kubectl", "docker", "terraform", "ansible"],
         },
         {
@@ -263,7 +281,13 @@ def _default_rule_items() -> list[dict[str, Any]]:
             "label": "Media",
             "color": "#a78bfa",
             "apps": ["vlc", "spotify", "mpv", "obs", "stremio"],
-            "domains": ["youtube.com", "spotify.com", "netflix.com", "twitch.tv", "soundcloud.com"],
+            "domains": [
+                "youtube.com",
+                "spotify.com",
+                "netflix.com",
+                "twitch.tv",
+                "soundcloud.com",
+            ],
         },
         {
             "id": "social",
@@ -299,7 +323,10 @@ def _parse_rules(raw: Any) -> tuple[CategoryRule, ...]:
         if not cat_id:
             continue
         label = str(item.get("label") or cat_id).strip() or cat_id
-        color = str(item.get("color") or "rgba(255,255,255,.45)").strip() or "rgba(255,255,255,.45)"
+        color = (
+            str(item.get("color") or "rgba(255,255,255,.45)").strip()
+            or "rgba(255,255,255,.45)"
+        )
         rules.append(
             CategoryRule(
                 id=cat_id,
@@ -356,9 +383,29 @@ def _read_override(path: Path) -> tuple[str, list[dict[str, Any]] | None]:
     return f"file:{path}", raw_rules
 
 
-@lru_cache(maxsize=1)
-def category_catalog() -> CategoryCatalog:
-    path = default_categories_path()
+def _categories_file_signature(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (int(stat.st_mtime_ns), int(stat.st_size))
+
+
+@lru_cache(maxsize=8)
+def _category_catalog_cached(
+    path_value: str, signature: tuple[int, int] | None
+) -> CategoryCatalog:
+    _ = signature
+    path = Path(path_value)
     source, raw = _read_override(path)
     rules = _parse_rules(raw if raw is not None else _default_rule_items())
     return CategoryCatalog(rules=rules, source=source)
+
+
+def category_catalog() -> CategoryCatalog:
+    path = default_categories_path()
+    return _category_catalog_cached(str(path), _categories_file_signature(path))
+
+
+def clear_category_catalog_cache() -> None:
+    _category_catalog_cached.cache_clear()

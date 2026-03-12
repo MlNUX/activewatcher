@@ -181,7 +181,6 @@ def apply(
             raise typer.BadParameter(str(e)) from e
 
     _print({"status": "ok", **result})
-    print("Reminder: restart backend to refresh cached category_catalog().")
 
 
 @app.command()

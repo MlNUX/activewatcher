@@ -41,8 +41,50 @@ async def _get_session_id() -> str:
         if uid_s.isdigit() and int(uid_s) == uid:
             candidates.append(session_id)
     if not candidates:
-        raise RuntimeError("could not determine XDG_SESSION_ID (no loginctl sessions for current uid)")
-    return candidates[-1]
+        raise RuntimeError(
+            "could not determine XDG_SESSION_ID (no loginctl sessions for current uid)"
+        )
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    best_session = candidates[0]
+    best_key = (-1, -1, "")
+    for session_id in candidates:
+        score = 0
+        try:
+            props = await _read_idle_props(session_id)
+            if _truthy(props.get("LockedHint", "")):
+                score += 1
+            if _truthy(props.get("IdleHint", "")):
+                score += 1
+        except Exception:
+            pass
+
+        try:
+            info_out = await _run(
+                ["loginctl", "show-session", session_id, "-p", "Active", "-p", "State"]
+            )
+            info_props: dict[str, str] = {}
+            for line in info_out.splitlines():
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                info_props[k.strip()] = v.strip()
+            if _truthy(info_props.get("Active", "")):
+                score += 8
+            if str(info_props.get("State", "")).strip().lower() == "active":
+                score += 4
+        except Exception:
+            pass
+
+        numeric = int(session_id) if session_id.isdigit() else -1
+        key = (score, numeric, session_id)
+        if key > best_key:
+            best_key = key
+            best_session = session_id
+
+    return best_session
 
 
 async def _read_idle_props(session_id: str) -> dict[str, str]:
@@ -171,7 +213,7 @@ def _compute_afk(
             return AfkDecision(afk=True, transition_ts=now_utc)
         return AfkDecision(afk=False, transition_ts=None)
 
-    return AfkDecision(afk=True, transition_ts=now_utc)
+    return AfkDecision(afk=False, transition_ts=None)
 
 
 @dataclass
@@ -196,16 +238,27 @@ class IdleWatcher:
         ts: datetime | None = None,
     ) -> None:
         now = time.monotonic()
-        data = {"afk": afk, "threshold_seconds": self.threshold_seconds, "session_id": session_id}
+        data = {
+            "afk": afk,
+            "threshold_seconds": self.threshold_seconds,
+            "session_id": session_id,
+        }
         state_json = _canonical_json(data)
 
         should_send = force or state_json != self._last_sent_state
-        if self.heartbeat_seconds > 0 and (now - self._last_sent_at) >= self.heartbeat_seconds:
+        if (
+            self.heartbeat_seconds > 0
+            and (now - self._last_sent_at) >= self.heartbeat_seconds
+        ):
             should_send = True
         if not should_send:
             return
 
-        ts_dt = ts.astimezone(timezone.utc) if ts is not None else datetime.now(timezone.utc)
+        ts_dt = (
+            ts.astimezone(timezone.utc)
+            if ts is not None
+            else datetime.now(timezone.utc)
+        )
         now_dt = datetime.now(timezone.utc)
         if self._last_sent_ts_utc is not None and ts_dt <= self._last_sent_ts_utc:
             bumped = self._last_sent_ts_utc + timedelta(milliseconds=1)
@@ -223,8 +276,14 @@ class IdleWatcher:
                 # When AFK start is backdated (e.g., after suspend), immediately refresh at "now"
                 # so the open interval stays alive and is not clipped by stale timeout.
                 refresh_now = datetime.now(timezone.utc)
-                refresh_ts_dt = refresh_now if refresh_now > ts_dt else (ts_dt + timedelta(milliseconds=1))
-                refresh_iso = refresh_ts_dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                refresh_ts_dt = (
+                    refresh_now
+                    if refresh_now > ts_dt
+                    else (ts_dt + timedelta(milliseconds=1))
+                )
+                refresh_iso = refresh_ts_dt.isoformat(timespec="milliseconds").replace(
+                    "+00:00", "Z"
+                )
                 refresh_payload = {
                     "bucket": "idle",
                     "source": self.source,
@@ -258,7 +317,9 @@ async def run(
         heartbeat_seconds=heartbeat_seconds,
     )
     lock_proc = ProcessRunningCache(lock_process)
-    print(f"[idle] session={session_id} threshold={threshold_seconds}s poll={poll_seconds}s")
+    print(
+        f"[idle] session={session_id} threshold={threshold_seconds}s poll={poll_seconds}s"
+    )
 
     while True:
         try:

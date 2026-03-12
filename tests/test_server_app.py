@@ -5,11 +5,18 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
-from fastapi.testclient import TestClient
+try:
+    from fastapi.testclient import TestClient
+    from activewatcher.server import app as server_app
 
-from activewatcher.server import app as server_app
+    _HAS_FASTAPI = True
+except Exception:  # pragma: no cover - dependency guard
+    TestClient: Any = None
+    server_app: Any = None
+    _HAS_FASTAPI = False
 
 
 def _state_payload(
@@ -27,6 +34,7 @@ def _state_payload(
     }
 
 
+@unittest.skipUnless(_HAS_FASTAPI, "fastapi test dependencies are not installed")
 class AppHelpersTests(unittest.TestCase):
     def test_normalize_origin(self) -> None:
         self.assertEqual(
@@ -65,6 +73,13 @@ class AppHelpersTests(unittest.TestCase):
                 server_app._trusted_hosts(), ["127.0.0.1", "localhost", "[::1]"]
             )
 
+    def test_is_loopback_client_host(self) -> None:
+        self.assertTrue(server_app._is_loopback_client_host("127.0.0.1"))
+        self.assertTrue(server_app._is_loopback_client_host("localhost"))
+        self.assertTrue(server_app._is_loopback_client_host("::1"))
+        self.assertFalse(server_app._is_loopback_client_host("192.168.1.44"))
+        self.assertFalse(server_app._is_loopback_client_host("example.com"))
+
     def test_frontend_dist_dir_and_parse_dt_param(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             custom = Path(tmp) / "frontend-dist"
@@ -81,10 +96,11 @@ class AppHelpersTests(unittest.TestCase):
             server_app._parse_dt_param("not-a-date", default=default)
 
 
+@unittest.skipUnless(_HAS_FASTAPI, "fastapi test dependencies are not installed")
 class AppEndpointsTests(unittest.TestCase):
     def _create_client(
-        self, *, with_frontend: bool
-    ) -> tuple[TestClient, tempfile.TemporaryDirectory[str]]:
+        self, *, with_frontend: bool, write_token: str | None = None
+    ) -> tuple[Any, tempfile.TemporaryDirectory[str]]:
         tmp = tempfile.TemporaryDirectory()
         tmp_path = Path(tmp.name)
         db_path = tmp_path / "events.sqlite3"
@@ -105,6 +121,8 @@ class AppEndpointsTests(unittest.TestCase):
             "ACTIVEWATCHER_TRUSTED_HOSTS": "127.0.0.1,localhost",
             "ACTIVEWATCHER_CORS_ORIGINS": "http://127.0.0.1:5173,http://localhost:5173",
         }
+        if write_token is not None:
+            env["ACTIVEWATCHER_WRITE_TOKEN"] = write_token
         patcher = mock.patch.dict(os.environ, env, clear=False)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -305,6 +323,98 @@ class AppEndpointsTests(unittest.TestCase):
         )
         self.assertEqual(categories_ok.status_code, 200)
         self.assertIn("apps", categories_ok.json())
+
+    def test_write_token_protects_mutating_endpoints(self) -> None:
+        client, _tmp = self._create_client(
+            with_frontend=False, write_token="secret-token"
+        )
+
+        payload = _state_payload(
+            ts="2026-03-01T12:00:00Z",
+            bucket="window",
+            source="hyprland",
+            data={"app": "Code", "title": "main.py"},
+        )
+        denied = client.post("/v1/state", json=payload)
+        self.assertEqual(denied.status_code, 401)
+
+        denied_bad = client.post(
+            "/v1/state",
+            json=payload,
+            headers={"X-ActiveWatcher-Token": "wrong"},
+        )
+        self.assertEqual(denied_bad.status_code, 401)
+
+        ok = client.post(
+            "/v1/state",
+            json=payload,
+            headers={"X-ActiveWatcher-Token": "secret-token"},
+        )
+        self.assertEqual(ok.status_code, 200)
+
+        timers_read = client.get("/v1/timers")
+        self.assertEqual(timers_read.status_code, 200)
+
+        create_denied = client.post(
+            "/v1/timers", json={"name": "counter", "kind": "counter"}
+        )
+        self.assertEqual(create_denied.status_code, 401)
+
+        create_ok = client.post(
+            "/v1/timers",
+            json={"name": "counter", "kind": "counter"},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        self.assertEqual(create_ok.status_code, 200)
+
+    def test_events_endpoint_supports_cursor_pagination(self) -> None:
+        client, _tmp = self._create_client(with_frontend=False)
+
+        rows = [
+            ("2026-03-01T12:00:00Z", "Code", "main.py"),
+            ("2026-03-01T12:01:00Z", "Firefox", "docs"),
+            ("2026-03-01T12:02:00Z", "Slack", "dm"),
+        ]
+        for ts, app, title in rows:
+            resp = client.post(
+                "/v1/state",
+                json=_state_payload(
+                    ts=ts,
+                    bucket="window",
+                    source="hyprland",
+                    data={"app": app, "title": title},
+                ),
+            )
+            self.assertEqual(resp.status_code, 200)
+
+        page1 = client.get(
+            "/v1/events",
+            params={
+                "bucket": "window",
+                "from": "2026-03-01T12:00:00Z",
+                "to": "2026-03-01T12:05:00Z",
+                "limit": 1,
+                "cursor": 0,
+            },
+        )
+        self.assertEqual(page1.status_code, 200)
+        body1 = page1.json()
+        self.assertEqual(len(body1.get("events") or []), 1)
+        self.assertEqual(body1.get("next_cursor"), 1)
+
+        page2 = client.get(
+            "/v1/events",
+            params={
+                "bucket": "window",
+                "from": "2026-03-01T12:00:00Z",
+                "to": "2026-03-01T12:05:00Z",
+                "limit": 1,
+                "cursor": body1.get("next_cursor"),
+            },
+        )
+        self.assertEqual(page2.status_code, 200)
+        body2 = page2.json()
+        self.assertEqual(len(body2.get("events") or []), 1)
 
     def test_timer_endpoints(self) -> None:
         client, _tmp = self._create_client(with_frontend=False)

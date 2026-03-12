@@ -27,6 +27,10 @@ Useful targets:
 
 - API CORS is restricted to local origins by default (`127.0.0.1`/`localhost` on ports `5173`, `5174`, `8712`).
 - Host header checks are restricted to local hosts by default (`127.0.0.1`, `localhost`, `[::1]`).
+- Optional write auth token for mutating endpoints (`POST /v1/state`, timers, autotag approve):
+  - `server.write_token` or `ACTIVEWATCHER_WRITE_TOKEN`
+  - clients send `X-ActiveWatcher-Token: <token>` (or `Authorization: Bearer <token>`)
+- If no write token is configured, mutating endpoints still accept only local loopback clients.
 - Override with config/env if needed:
   - `server.cors_origins` or `ACTIVEWATCHER_CORS_ORIGINS` (comma-separated)
   - `server.trusted_hosts` or `ACTIVEWATCHER_TRUSTED_HOSTS` (comma-separated)
@@ -79,6 +83,7 @@ The UI includes top-level tabs: `dashboard`, `stats`, `timers`, `settings`.
 - `white mode` toggle switches between dark and light themes.
 - `high contrast` toggle increases readability/contrast.
 - Timer end alerts can be enabled (`desktop notification` and `sound alert`).
+- Optional API write token can be stored in UI settings for timer/autotag write actions.
 - You can export tracked data and timers as JSON.
 - Settings can be exported/imported and reset to defaults.
 - Preferences are saved in browser local storage (for example `aw.ui.theme`).
@@ -153,3 +158,4 @@ Important defaults:
 - LLM is local-only (`ollama`).
 - `apply` is blocked unless `review-gate.json` and `evaluation.json` pass all checks.
 - `apply` requires explicit confirmation token `APPLY`.
+- Updated categories are picked up automatically by the backend (no restart required).

@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from activewatcher.common.time import parse_rfc3339, to_rfc3339, to_utc, utcnow
 
+from . import db as server_db
+
 
 TimerKind = Literal["timer", "counter"]
 TimerState = Literal["idle", "running", "paused", "finished"]
@@ -235,7 +237,7 @@ def list_timers(
             finished_to_persist.append((snapshot.id, snapshot.duration_seconds))
 
     if finished_to_persist:
-        conn.execute("BEGIN IMMEDIATE")
+        server_db.begin_immediate(conn)
         try:
             for timer_id, duration_seconds in finished_to_persist:
                 _persist_finished_timer(
@@ -269,7 +271,7 @@ def create_timer(
     instant = _coerce_now(now)
     now_iso = to_rfc3339(instant)
 
-    conn.execute("BEGIN IMMEDIATE")
+    server_db.begin_immediate(conn)
     try:
         cur = conn.execute(
             """
@@ -304,7 +306,7 @@ def start_timer(
     instant = _coerce_now(now)
     now_iso = to_rfc3339(instant)
 
-    conn.execute("BEGIN IMMEDIATE")
+    server_db.begin_immediate(conn)
     try:
         row = _fetch_timer_row(conn, timer_id)
         current = _snapshot_from_row(row, now=instant)
@@ -343,7 +345,7 @@ def pause_timer(
     instant = _coerce_now(now)
     now_iso = to_rfc3339(instant)
 
-    conn.execute("BEGIN IMMEDIATE")
+    server_db.begin_immediate(conn)
     try:
         row = _fetch_timer_row(conn, timer_id)
         current = _snapshot_from_row(row, now=instant)
@@ -396,7 +398,7 @@ def stop_timer(
     instant = _coerce_now(now)
     now_iso = to_rfc3339(instant)
 
-    conn.execute("BEGIN IMMEDIATE")
+    server_db.begin_immediate(conn)
     try:
         row = _fetch_timer_row(conn, timer_id)
         current = _snapshot_from_row(row, now=instant)
@@ -433,7 +435,7 @@ def delete_timer(
 ) -> dict[str, Any]:
     instant = _coerce_now(now)
 
-    conn.execute("BEGIN IMMEDIATE")
+    server_db.begin_immediate(conn)
     try:
         row = _fetch_timer_row(conn, timer_id)
         snapshot = _snapshot_from_row(row, now=instant)
@@ -458,7 +460,7 @@ def reactivate_timer(
     instant = _coerce_now(now)
     now_iso = to_rfc3339(instant)
 
-    conn.execute("BEGIN IMMEDIATE")
+    server_db.begin_immediate(conn)
     try:
         row = _fetch_timer_row(conn, timer_id)
         current = _snapshot_from_row(row, now=instant)

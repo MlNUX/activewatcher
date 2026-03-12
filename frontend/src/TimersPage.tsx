@@ -66,13 +66,18 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function postJson<T>(url: string, payload: unknown): Promise<T> {
+async function postJson<T>(url: string, payload: unknown, writeToken?: string): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+  const token = String(writeToken || "").trim();
+  if (token) {
+    headers["X-ActiveWatcher-Token"] = token;
+  }
   const res = await fetch(url, {
     method: "POST",
     cache: "no-store",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers,
     body: JSON.stringify(payload)
   });
   if (!res.ok) {
@@ -140,11 +145,13 @@ function playTimerFinishedSound(): void {
 export function TimersPage({
   apiBase,
   timerNotifications,
-  timerSound
+  timerSound,
+  apiWriteToken
 }: {
   apiBase: string;
   timerNotifications: boolean;
   timerSound: boolean;
+  apiWriteToken: string;
 }) {
   const [timers, setTimers] = useState<TimerRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -273,7 +280,7 @@ export function TimersPage({
         kind
       };
       if (kind === "timer") payload.duration_seconds = durationSeconds;
-      await postJson<TimerActionResponse>(`${apiBase}/timers`, payload);
+      await postJson<TimerActionResponse>(`${apiBase}/timers`, payload, apiWriteToken);
       setName("");
       if (kind === "counter") setKind("timer");
       setNote(`created ${kind}: ${trimmedName}`);
@@ -294,7 +301,11 @@ export function TimersPage({
     setError("");
     setNote("");
     try {
-      await postJson<TimerActionResponse>(`${apiBase}/timers/${timerId}/${action}`, {});
+      await postJson<TimerActionResponse>(
+        `${apiBase}/timers/${timerId}/${action}`,
+        {},
+        apiWriteToken
+      );
       if (action === "reactivate") {
         setListView("active");
       }

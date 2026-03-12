@@ -249,5 +249,23 @@ def default_stale_after_seconds() -> int:
     return max(0, value)
 
 
+def default_write_token() -> str:
+    return config_str(
+        ("server", "write_token"),
+        env_var="ACTIVEWATCHER_WRITE_TOKEN",
+        default="",
+        allow_empty=True,
+    ).strip()
+
+
+def default_sqlite_busy_timeout_ms() -> int:
+    value = config_int(
+        ("server", "sqlite_busy_timeout_ms"),
+        env_var="ACTIVEWATCHER_SQLITE_BUSY_TIMEOUT_MS",
+        default=5000,
+    )
+    return max(0, value)
+
+
 def ensure_parent_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

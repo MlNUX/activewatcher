@@ -1590,6 +1590,26 @@ body.theme-high-contrast .subnav {
   letter-spacing: 0.08em;
 }
 
+.settingsField input {
+  width: 100%;
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--ink);
+  padding: 8px 12px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.2;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.settingsField input:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 1px rgba(94, 201, 255, 0.32);
+}
+
 .settingsToggleRow {
   display: flex;
   gap: 7px;

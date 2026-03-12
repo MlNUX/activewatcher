@@ -5,11 +5,13 @@ import { SettingsPage } from "./SettingsPage";
 import { TimersPage } from "./TimersPage";
 import {
   applyUiSettingsSnapshot,
+  getApiWriteToken,
   getContrastMode,
   getDesignVariant,
   getTimerNotificationsEnabled,
   getTimerSoundEnabled,
   resetUiSettings,
+  setApiWriteToken,
   setContrastMode,
   setDesignVariant,
   setTimerNotificationsEnabled,
@@ -111,6 +113,7 @@ type ApiEvent = {
 
 type EventsResponse = {
   events: ApiEvent[];
+  next_cursor?: number | null;
 };
 
 type AutotagRunRow = {
@@ -289,6 +292,8 @@ const DEFAULT_REFRESH_MS = 30_000;
 const ALL_RANGE_REFRESH_MS = 120_000;
 const EVENTS_CHUNK_MS = 7 * 24 * 3600 * 1000;
 const EVENTS_MAX_CHUNKS = 48;
+const EVENTS_PAGE_LIMIT = 2000;
+const EVENTS_MAX_TOTAL_ROWS = 100000;
 
 const RANGES: Array<{ key: RangeKey; label: string }> = [
   { key: "24h", label: "24h" },
@@ -948,10 +953,40 @@ function eventDedupeKey(event: ApiEvent): string {
 }
 
 async function fetchEventsBucketChunked(apiBase: string, bucket: string, window: TimeWindow): Promise<ApiEvent[]> {
+  async function fetchWindowPaged(w: TimeWindow): Promise<ApiEvent[]> {
+    const rows: ApiEvent[] = [];
+    const seen = new Set<string>();
+    let cursor = 0;
+
+    while (true) {
+      const value = await fetchJson<EventsResponse>(
+        `${apiBase}/events?bucket=${encodeURIComponent(bucket)}&${qs(w)}&limit=${EVENTS_PAGE_LIMIT}&cursor=${cursor}`
+      );
+      const events = Array.isArray(value.events) ? value.events : [];
+      for (const event of events) {
+        const key = eventDedupeKey(event);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push(event);
+        if (rows.length >= EVENTS_MAX_TOTAL_ROWS) {
+          return rows;
+        }
+      }
+
+      const nextCursor =
+        typeof value.next_cursor === "number" && Number.isFinite(value.next_cursor) && value.next_cursor > cursor
+          ? Math.floor(value.next_cursor)
+          : null;
+      if (nextCursor == null) break;
+      cursor = nextCursor;
+    }
+
+    return rows;
+  }
+
   const parsed = parseTimeWindow(window);
   if (!parsed) {
-    const value = await fetchJson<EventsResponse>(`${apiBase}/events?bucket=${encodeURIComponent(bucket)}&${qs(window)}`);
-    return Array.isArray(value.events) ? value.events : [];
+    return fetchWindowPaged(window);
   }
 
   const durationMs = parsed.toMs - parsed.fromMs;
@@ -964,14 +999,15 @@ async function fetchEventsBucketChunked(apiBase: string, bucket: string, window:
   const seen = new Set<string>();
 
   for (const chunk of chunks) {
-    const value = await fetchJson<EventsResponse>(`${apiBase}/events?bucket=${encodeURIComponent(bucket)}&${qs(chunk)}`);
-    const events = Array.isArray(value.events) ? value.events : [];
+    const events = await fetchWindowPaged(chunk);
     for (const event of events) {
       const key = eventDedupeKey(event);
       if (seen.has(key)) continue;
       seen.add(key);
       rows.push(event);
+      if (rows.length >= EVENTS_MAX_TOTAL_ROWS) break;
     }
+    if (rows.length >= EVENTS_MAX_TOTAL_ROWS) break;
   }
 
   rows.sort((a, b) => {
@@ -1245,13 +1281,18 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function postJson<T>(url: string, payload: unknown): Promise<T> {
+async function postJson<T>(url: string, payload: unknown, writeToken?: string): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+  const token = String(writeToken || "").trim();
+  if (token) {
+    headers["X-ActiveWatcher-Token"] = token;
+  }
   const res = await fetch(url, {
     method: "POST",
     cache: "no-store",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers,
     body: JSON.stringify(payload)
   });
   if (!res.ok) {
@@ -2130,6 +2171,7 @@ export default function App() {
   const [designVariant, setDesignVariantState] = useState<DesignVariant>(() => getDesignVariant());
   const [timerNotifications, setTimerNotificationsState] = useState(() => getTimerNotificationsEnabled());
   const [timerSound, setTimerSoundState] = useState(() => getTimerSoundEnabled());
+  const [apiWriteToken, setApiWriteTokenState] = useState(() => getApiWriteToken());
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -2161,12 +2203,18 @@ export default function App() {
     setTimerSoundEnabled(enabled);
   }
 
+  function onApiWriteTokenChange(next: string): void {
+    setApiWriteTokenState(next);
+    setApiWriteToken(next);
+  }
+
   function syncSettings(next: UiSettingsSnapshot): void {
     onThemeModeChange(next.themeMode);
     onContrastModeChange(next.contrastMode);
     onDesignVariantChange(next.designVariant);
     onTimerNotificationsChange(next.timerNotifications);
     onTimerSoundChange(next.timerSound);
+    onApiWriteTokenChange(next.apiWriteToken);
   }
 
   function onSettingsChange(patch: Partial<UiSettingsSnapshot>): void {
@@ -2175,6 +2223,7 @@ export default function App() {
     if (patch.designVariant) onDesignVariantChange(patch.designVariant);
     if (typeof patch.timerNotifications === "boolean") onTimerNotificationsChange(patch.timerNotifications);
     if (typeof patch.timerSound === "boolean") onTimerSoundChange(patch.timerSound);
+    if (typeof patch.apiWriteToken === "string") onApiWriteTokenChange(patch.apiWriteToken);
   }
 
   function onSettingsImport(payload: unknown): void {
@@ -2197,23 +2246,11 @@ export default function App() {
       contrastMode,
       designVariant,
       timerNotifications,
-      timerSound
+      timerSound,
+      apiWriteToken
     }),
-    [themeMode, contrastMode, designVariant, timerNotifications, timerSound]
+    [themeMode, contrastMode, designVariant, timerNotifications, timerSound, apiWriteToken]
   );
-
-  const loadParamsRef = useRef<{
-    page: PageId;
-    topic: TopicId;
-    range: RangeKey;
-    dayWindowMode: DayWindowMode;
-    statsDayKey: string;
-    statsWeekStart: string;
-    statsMonthKey: string;
-    reloadKey: number;
-    autotagRunId: string;
-    apiBase: string;
-  } | null>(null);
 
   function replaceQuery(
     nextRange: RangeKey,
@@ -2334,38 +2371,9 @@ export default function App() {
     let loadInFlight = false;
 
     const refreshMs = range === "all" ? ALL_RANGE_REFRESH_MS : DEFAULT_REFRESH_MS;
-    const previousLoad = loadParamsRef.current;
     const baseRequested = requestedLoadKeys(page, topic);
-    const runSwitchOnly =
-      previousLoad != null &&
-      previousLoad.page === page &&
-      previousLoad.topic === topic &&
-      previousLoad.range === range &&
-      previousLoad.dayWindowMode === dayWindowMode &&
-      previousLoad.statsDayKey === statsDayKey &&
-      previousLoad.statsWeekStart === statsWeekStart &&
-      previousLoad.statsMonthKey === statsMonthKey &&
-      previousLoad.reloadKey === reloadKey &&
-      previousLoad.apiBase === apiBase &&
-      previousLoad.autotagRunId !== autotagRunId;
-    const requested =
-      runSwitchOnly && baseRequested.has("autotag")
-        ? new Set<LoadKey>(["autotag"])
-        : baseRequested;
+    const requested = baseRequested;
     const { eager: eagerRequested, deferred: deferredRequested } = splitRequestedKeysForLoad(page, topic, requested);
-
-    loadParamsRef.current = {
-      page,
-      topic,
-      range,
-      dayWindowMode,
-      statsDayKey,
-      statsWeekStart,
-      statsMonthKey,
-      reloadKey,
-      autotagRunId,
-      apiBase
-    };
 
     async function load() {
       if (loadInFlight) return;
@@ -3653,11 +3661,15 @@ export default function App() {
     setAutotagApproveNote("");
     try {
       const allowedCategoryDropIds = parseIdList(autotagAllowedDropIds);
-      const value = await postJson<AutotagApproveResponse>(`${apiBase}/autotag/review-gate/approve`, {
-        run_id: runId,
-        approved_by: approvedBy,
-        allowed_category_drop_ids: allowedCategoryDropIds
-      });
+      const value = await postJson<AutotagApproveResponse>(
+        `${apiBase}/autotag/review-gate/approve`,
+        {
+          run_id: runId,
+          approved_by: approvedBy,
+          allowed_category_drop_ids: allowedCategoryDropIds
+        },
+        apiWriteToken
+      );
       const approvedAt = String(value?.review_gate?.approved_at || "");
       setAutotagApproveNote(
         approvedAt ? `Run approved: ${fmtTs(approvedAt)}.` : "Run approved."
@@ -3969,7 +3981,12 @@ export default function App() {
       </section>
 
       {page === "timers" ? (
-        <TimersPage apiBase={apiBase} timerNotifications={timerNotifications} timerSound={timerSound} />
+        <TimersPage
+          apiBase={apiBase}
+          timerNotifications={timerNotifications}
+          timerSound={timerSound}
+          apiWriteToken={apiWriteToken}
+        />
       ) : null}
       {page === "settings" ? (
         <SettingsPage

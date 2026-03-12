@@ -9,6 +9,8 @@ from activewatcher.common.config import default_stale_after_seconds
 from activewatcher.common.models import END_MARKER_KEY, StateEvent
 from activewatcher.common.time import parse_rfc3339, to_rfc3339
 
+from . import db as server_db
+
 
 class NonMonotonicTimestampError(ValueError):
     pass
@@ -37,7 +39,7 @@ def ingest_state(conn: sqlite3.Connection, state: StateEvent) -> IngestResult:
     data.pop(END_MARKER_KEY, None)
     data_json = _canonical_json(data)
 
-    conn.execute("BEGIN IMMEDIATE")
+    server_db.begin_immediate(conn)
     try:
         row = conn.execute(
             """
@@ -52,7 +54,9 @@ def ingest_state(conn: sqlite3.Connection, state: StateEvent) -> IngestResult:
         if end_requested:
             if row is None:
                 conn.execute("COMMIT")
-                return IngestResult(action="ended_noop", previous_event_id=None, current_event_id=None)
+                return IngestResult(
+                    action="ended_noop", previous_event_id=None, current_event_id=None
+                )
 
             event_id = int(row["id"])
             last_seen_ts = str(row["last_seen_ts"])
@@ -67,9 +71,14 @@ def ingest_state(conn: sqlite3.Connection, state: StateEvent) -> IngestResult:
                     f"non-monotonic ts for end ({bucket},{source}): {ts} < {start_ts}"
                 )
 
-            conn.execute("UPDATE events SET end_ts = ?, last_seen_ts = ? WHERE id = ?", (ts, ts, event_id))
+            conn.execute(
+                "UPDATE events SET end_ts = ?, last_seen_ts = ? WHERE id = ?",
+                (ts, ts, event_id),
+            )
             conn.execute("COMMIT")
-            return IngestResult(action="ended", previous_event_id=event_id, current_event_id=None)
+            return IngestResult(
+                action="ended", previous_event_id=event_id, current_event_id=None
+            )
 
         if row is None:
             cur = conn.execute(
@@ -81,7 +90,9 @@ def ingest_state(conn: sqlite3.Connection, state: StateEvent) -> IngestResult:
             )
             event_id = int(cur.lastrowid)
             conn.execute("COMMIT")
-            return IngestResult(action="inserted", previous_event_id=None, current_event_id=event_id)
+            return IngestResult(
+                action="inserted", previous_event_id=None, current_event_id=event_id
+            )
 
         event_id = int(row["id"])
         last_seen_ts = str(row["last_seen_ts"])
@@ -91,14 +102,22 @@ def ingest_state(conn: sqlite3.Connection, state: StateEvent) -> IngestResult:
         if stale_after_seconds > 0 and ts > last_seen_ts:
             # If the source was silent for too long (e.g. reboot/suspend), split the interval
             # at the last seen timestamp instead of bridging the offline gap as runtime.
-            gap_seconds = (parse_rfc3339(ts) - parse_rfc3339(last_seen_ts)).total_seconds()
+            gap_seconds = (
+                parse_rfc3339(ts) - parse_rfc3339(last_seen_ts)
+            ).total_seconds()
             stale_gap = gap_seconds > stale_after_seconds
 
         if str(row["data_json"]) == data_json and not stale_gap:
             if ts > last_seen_ts:
-                conn.execute("UPDATE events SET last_seen_ts = ? WHERE id = ?", (ts, event_id))
+                conn.execute(
+                    "UPDATE events SET last_seen_ts = ? WHERE id = ?", (ts, event_id)
+                )
             conn.execute("COMMIT")
-            return IngestResult(action="refreshed", previous_event_id=event_id, current_event_id=event_id)
+            return IngestResult(
+                action="refreshed",
+                previous_event_id=event_id,
+                current_event_id=event_id,
+            )
 
         if ts <= last_seen_ts:
             raise NonMonotonicTimestampError(
@@ -110,7 +129,10 @@ def ingest_state(conn: sqlite3.Connection, state: StateEvent) -> IngestResult:
             )
 
         end_ts = last_seen_ts if stale_gap else ts
-        conn.execute("UPDATE events SET end_ts = ?, last_seen_ts = ? WHERE id = ?", (end_ts, end_ts, event_id))
+        conn.execute(
+            "UPDATE events SET end_ts = ?, last_seen_ts = ? WHERE id = ?",
+            (end_ts, end_ts, event_id),
+        )
         cur = conn.execute(
             """
             INSERT INTO events(bucket, source, start_ts, end_ts, last_seen_ts, data_json)
@@ -120,7 +142,9 @@ def ingest_state(conn: sqlite3.Connection, state: StateEvent) -> IngestResult:
         )
         new_id = int(cur.lastrowid)
         conn.execute("COMMIT")
-        return IngestResult(action="rotated", previous_event_id=event_id, current_event_id=new_id)
+        return IngestResult(
+            action="rotated", previous_event_id=event_id, current_event_id=new_id
+        )
     except Exception:
         conn.execute("ROLLBACK")
         raise

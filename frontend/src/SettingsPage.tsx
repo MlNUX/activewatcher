@@ -12,6 +12,7 @@ type EventsResponse = {
   from_ts?: string;
   to_ts?: string;
   events?: unknown[];
+  next_cursor?: number | null;
 };
 
 type TimersResponse = {
@@ -121,16 +122,34 @@ export function SettingsPage({
 
             const from = encodeURIComponent(range.from_ts);
             const to = encodeURIComponent(range.to_ts);
-            const events = await fetchJson<EventsResponse>(
-              `${apiBase}/events?bucket=${encodeURIComponent(bucket)}&from=${from}&to=${to}`
-            );
+            const allEvents: unknown[] = [];
+            let cursor = 0;
+            let finalFromTs = range.from_ts;
+            let finalToTs = range.to_ts;
+            while (true) {
+              const events = await fetchJson<EventsResponse>(
+                `${apiBase}/events?bucket=${encodeURIComponent(bucket)}&from=${from}&to=${to}&limit=2000&cursor=${cursor}`
+              );
+              if (events.from_ts) finalFromTs = events.from_ts;
+              if (events.to_ts) finalToTs = events.to_ts;
+              if (Array.isArray(events.events) && events.events.length > 0) {
+                allEvents.push(...events.events);
+              }
+
+              const nextCursor =
+                typeof events.next_cursor === "number" && Number.isFinite(events.next_cursor) && events.next_cursor > cursor
+                  ? Math.floor(events.next_cursor)
+                  : null;
+              if (nextCursor == null) break;
+              cursor = nextCursor;
+            }
             dataByBucket[bucket] = {
               bucket,
               empty: false,
-              from_ts: events.from_ts || range.from_ts,
-              to_ts: events.to_ts || range.to_ts,
-              event_count: Array.isArray(events.events) ? events.events.length : 0,
-              events: Array.isArray(events.events) ? events.events : []
+              from_ts: finalFromTs,
+              to_ts: finalToTs,
+              event_count: allEvents.length,
+              events: allEvents
             };
           } catch (e) {
             const message = String(e);
@@ -310,6 +329,27 @@ export function SettingsPage({
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div className="settingsSection">
+            <div className="settingsSectionHd">
+              <h3 className="settingsSectionTitle">API Security</h3>
+              <div className="sub settingsSectionDesc">token for write actions</div>
+            </div>
+            <div className="settingsGrid">
+              <label className="settingsField" htmlFor="aw-api-write-token">
+                <span>write token (optional)</span>
+                <input
+                  id="aw-api-write-token"
+                  type="password"
+                  className="settingsInput"
+                  autoComplete="off"
+                  value={settings.apiWriteToken}
+                  onChange={(e) => onChange({ apiWriteToken: e.currentTarget.value })}
+                  placeholder="X-ActiveWatcher-Token"
+                />
+              </label>
             </div>
           </div>
 

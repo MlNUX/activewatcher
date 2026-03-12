@@ -452,12 +452,25 @@ class HyprlandWatcher:
         if not payloads:
             return True
         client = ActiveWatcherAsyncClient(self.server_url)
+        max_parallel = min(8, max(1, len(payloads)))
+        sem = asyncio.Semaphore(max_parallel)
+
+        async def _post_one(payload: dict[str, Any]) -> Exception | None:
+            async with sem:
+                try:
+                    await client.post_state(payload)
+                    return None
+                except Exception as e:
+                    return e
+
         try:
-            for payload in payloads:
-                await client.post_state(payload)
-        except Exception as e:
-            print(f"[hyprland] post_state failed: {e}")
-            return False
+            results = await asyncio.gather(
+                *[_post_one(payload) for payload in payloads], return_exceptions=False
+            )
+            errors = [err for err in results if err is not None]
+            if errors:
+                print(f"[hyprland] post_state failed: {errors[0]}")
+                return False
         finally:
             await client.aclose()
         return True

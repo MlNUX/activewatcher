@@ -293,6 +293,69 @@ def load_intervals(
     from_iso = to_rfc3339(from_dt)
     to_iso = to_rfc3339(to_dt)
 
+    rows = _load_interval_rows(
+        conn,
+        bucket=bucket,
+        source=source,
+        from_iso=from_iso,
+        to_iso=to_iso,
+        limit=None,
+        cursor=0,
+    )
+    intervals = _rows_to_intervals(rows=rows, from_dt=from_dt, to_dt=to_dt)
+
+    return from_dt, to_dt, intervals
+
+
+def load_intervals_limited(
+    conn: sqlite3.Connection,
+    *,
+    bucket: str | None,
+    source: str | None,
+    from_ts: datetime | None,
+    to_ts: datetime | None,
+    limit: int = 5000,
+    cursor: int = 0,
+) -> tuple[datetime, datetime, list[Interval], int | None]:
+    now = utcnow()
+    to_dt = to_utc(to_ts) if to_ts else now
+    from_dt = to_utc(from_ts) if from_ts else (to_dt - timedelta(hours=24))
+    if to_dt < from_dt:
+        from_dt, to_dt = to_dt, from_dt
+
+    from_iso = to_rfc3339(from_dt)
+    to_iso = to_rfc3339(to_dt)
+    bounded_limit = max(1, min(50000, int(limit)))
+    bounded_cursor = max(0, int(cursor))
+
+    rows = _load_interval_rows(
+        conn,
+        bucket=bucket,
+        source=source,
+        from_iso=from_iso,
+        to_iso=to_iso,
+        limit=bounded_limit + 1,
+        cursor=bounded_cursor,
+    )
+    has_more = len(rows) > bounded_limit
+    if has_more:
+        rows = rows[:bounded_limit]
+
+    intervals = _rows_to_intervals(rows=rows, from_dt=from_dt, to_dt=to_dt)
+    next_cursor = bounded_cursor + bounded_limit if has_more else None
+    return from_dt, to_dt, intervals, next_cursor
+
+
+def _load_interval_rows(
+    conn: sqlite3.Connection,
+    *,
+    bucket: str | None,
+    source: str | None,
+    from_iso: str,
+    to_iso: str,
+    limit: int | None,
+    cursor: int,
+) -> list[sqlite3.Row]:
     where = ["start_ts < ?", "(end_ts IS NULL OR end_ts > ?)"]
     params: list[Any] = [to_iso, from_iso]
     if bucket is not None:
@@ -302,16 +365,22 @@ def load_intervals(
         where.append("source = ?")
         params.append(source)
 
-    rows = conn.execute(
-        f"""
-        SELECT id, bucket, source, start_ts, end_ts, last_seen_ts, data_json
-          FROM events
-         WHERE {" AND ".join(where)}
-         ORDER BY start_ts ASC
-        """.strip(),
-        tuple(params),
-    ).fetchall()
+    sql = (
+        "SELECT id, bucket, source, start_ts, end_ts, last_seen_ts, data_json "
+        "FROM events "
+        f"WHERE {' AND '.join(where)} "
+        "ORDER BY start_ts ASC"
+    )
+    if limit is not None:
+        sql = f"{sql} LIMIT ? OFFSET ?"
+        params.extend([max(1, int(limit)), max(0, int(cursor))])
 
+    return conn.execute(sql, tuple(params)).fetchall()
+
+
+def _rows_to_intervals(
+    *, rows: list[sqlite3.Row], from_dt: datetime, to_dt: datetime
+) -> list[Interval]:
     intervals: list[Interval] = []
     stale_after = default_stale_after_seconds()
     stale_before = to_dt - timedelta(seconds=stale_after) if stale_after > 0 else None
@@ -341,8 +410,7 @@ def load_intervals(
                 data=_parse_json(str(r["data_json"])),
             )
         )
-
-    return from_dt, to_dt, intervals
+    return intervals
 
 
 def _load_ranges(
@@ -1274,6 +1342,20 @@ def _read_jsonl_file(path: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _count_non_empty_lines(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    count = 0
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.strip():
+                    count += 1
+    except Exception:
+        return 0
+    return count
+
+
 def _file_sha256(path: Path) -> str:
     h = sha256()
     with path.open("rb") as f:
@@ -1387,7 +1469,7 @@ def list_autotag_runs(*, limit: int = 50) -> dict[str, Any]:
             evaluate_raw if isinstance(evaluate_raw, dict) else {}
         )
         review_gate = _read_autotag_review_gate(root)
-        decision_count = len(_read_jsonl_file(root / "autotag-decisions.jsonl"))
+        decision_count = _count_non_empty_lines(root / "autotag-decisions.jsonl")
         rows.append(
             {
                 "run_id": root.name,

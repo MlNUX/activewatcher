@@ -4,6 +4,7 @@ const USE_PROMISE_API = Boolean(globalThis.browser);
 const DEFAULTS = {
   serverUrl: "http://127.0.0.1:8712",
   browserLabel: "auto",
+  writeToken: "",
 };
 
 const ALLOWED_SERVER_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
@@ -64,6 +65,7 @@ async function load() {
   const normalized = normalizeServerUrl(data.serverUrl);
   document.getElementById("serverUrl").value = normalized || DEFAULTS.serverUrl;
   document.getElementById("browserLabel").value = data.browserLabel || DEFAULTS.browserLabel;
+  document.getElementById("writeToken").value = String(data.writeToken || "").trim();
 }
 
 async function save() {
@@ -75,8 +77,13 @@ async function save() {
     return;
   }
   const browserLabel = String(document.getElementById("browserLabel").value || DEFAULTS.browserLabel).trim();
+  const writeToken = String(document.getElementById("writeToken").value || "").trim();
   try {
-    await callApi(api.storage.local, "set", { serverUrl, browserLabel });
+    await callApi(api.storage.local, "set", {
+      serverUrl,
+      browserLabel,
+      writeToken,
+    });
     status.textContent = "Saved.";
   } catch (e) {
     status.textContent = `Save failed: ${e}`;

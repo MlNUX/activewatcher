@@ -5,9 +5,15 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-import typer
+try:
+    import typer
+    from activewatcher_autotag import cli
 
-from activewatcher_autotag import cli
+    _HAS_TYPER = True
+except Exception:  # pragma: no cover - dependency guard
+    typer = None  # type: ignore[assignment]
+    cli = None  # type: ignore[assignment]
+    _HAS_TYPER = False
 
 
 @contextmanager
@@ -15,6 +21,7 @@ def _dummy_lock(*args, **kwargs):
     yield Path("/tmp/activewatcher-test.lock")
 
 
+@unittest.skipUnless(_HAS_TYPER, "typer dependency is not installed")
 class CliErrorMappingTests(unittest.TestCase):
     def test_scan_maps_existing_run_to_bad_parameter(self) -> None:
         with (

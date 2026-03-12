@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from activewatcher.common import config
 
@@ -16,7 +17,7 @@ class CommonConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             data_home = Path(tmp) / "data"
             config_home = Path(tmp) / "cfg"
-            with unittest.mock.patch.dict(
+            with mock.patch.dict(
                 os.environ,
                 {
                     "XDG_DATA_HOME": str(data_home),
@@ -37,7 +38,7 @@ class CommonConfigTests(unittest.TestCase):
             custom_cfg = Path(tmp) / "custom.toml"
             custom_db = Path(tmp) / "db.sqlite3"
             custom_categories = Path(tmp) / "cats.json"
-            with unittest.mock.patch.dict(
+            with mock.patch.dict(
                 os.environ,
                 {
                     "ACTIVEWATCHER_CONFIG_PATH": str(custom_cfg),
@@ -74,7 +75,7 @@ class CommonConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with unittest.mock.patch.dict(
+            with mock.patch.dict(
                 os.environ,
                 {
                     "ACTIVEWATCHER_CONFIG_PATH": str(cfg_path),
@@ -124,7 +125,7 @@ class CommonConfigTests(unittest.TestCase):
                 )
 
             # Without env override, values come from config file.
-            with unittest.mock.patch.dict(
+            with mock.patch.dict(
                 os.environ,
                 {"ACTIVEWATCHER_CONFIG_PATH": str(cfg_path)},
                 clear=True,
@@ -144,6 +145,19 @@ class CommonConfigTests(unittest.TestCase):
                     2.5,
                 )
                 self.assertEqual(config.default_stale_after_seconds(), 77)
+
+    def test_write_token_and_busy_timeout_defaults(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ACTIVEWATCHER_WRITE_TOKEN": "  secret-token  ",
+                "ACTIVEWATCHER_SQLITE_BUSY_TIMEOUT_MS": "-9",
+            },
+            clear=False,
+        ):
+            config._load_runtime_config.cache_clear()
+            self.assertEqual(config.default_write_token(), "secret-token")
+            self.assertEqual(config.default_sqlite_busy_timeout_ms(), 0)
 
     def test_parse_helpers_cover_edge_cases(self) -> None:
         self.assertIs(config._parse_bool(True), True)
@@ -180,7 +194,7 @@ class CommonConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = Path(tmp) / "config.toml"
             cfg_path.write_text("[broken", encoding="utf-8")
-            with unittest.mock.patch.dict(
+            with mock.patch.dict(
                 os.environ,
                 {"ACTIVEWATCHER_CONFIG_PATH": str(cfg_path)},
                 clear=False,

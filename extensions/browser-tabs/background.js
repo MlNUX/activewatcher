@@ -4,6 +4,7 @@ const USE_PROMISE_API = Boolean(globalThis.browser);
 const DEFAULTS = {
   serverUrl: "http://127.0.0.1:8712",
   browserLabel: "auto",
+  writeToken: "",
 };
 
 let sendTimer = null;
@@ -172,9 +173,14 @@ async function postState() {
   if (key === lastPayloadKey) return;
 
   try {
+    const headers = { "Content-Type": "application/json" };
+    const writeToken = String(settings.writeToken || "").trim();
+    if (writeToken) {
+      headers["X-ActiveWatcher-Token"] = writeToken;
+    }
     const response = await fetch(`${serverUrl}/v1/state`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body,
     });
     if (response.ok) {

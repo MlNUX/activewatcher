@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
-from activewatcher.common.config import ensure_parent_dir
+from activewatcher.common.config import (
+    default_sqlite_busy_timeout_ms,
+    ensure_parent_dir,
+)
 
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
@@ -14,7 +18,31 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute(f"PRAGMA busy_timeout = {int(default_sqlite_busy_timeout_ms())};")
     return conn
+
+
+def begin_immediate(
+    conn: sqlite3.Connection,
+    *,
+    retries: int = 3,
+    base_backoff_seconds: float = 0.05,
+) -> None:
+    attempt = 0
+    while True:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            return
+        except sqlite3.OperationalError as e:
+            message = str(e).lower()
+            if "locked" not in message and "busy" not in message:
+                raise
+            if attempt >= max(0, int(retries)):
+                raise
+            sleep_s = max(0.0, float(base_backoff_seconds)) * (2**attempt)
+            if sleep_s > 0:
+                time.sleep(sleep_s)
+            attempt += 1
 
 
 def init_db(conn: sqlite3.Connection) -> None:

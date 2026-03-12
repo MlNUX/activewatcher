@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import os
 import unittest
 from unittest import mock
 
@@ -28,7 +29,7 @@ class CommonHttpTests(unittest.IsolatedAsyncioTestCase):
             value = client.get_json("/v1/test", params={"a": "b"})
             self.assertEqual(value, {"ok": True})
             fake_httpx_client.get.assert_called_once_with(
-                "http://127.0.0.1:8712/v1/test", params={"a": "b"}
+                "http://127.0.0.1:8712/v1/test", params={"a": "b"}, headers=None
             )
             client.close()
             fake_httpx_client.close.assert_called_once()
@@ -48,10 +49,55 @@ class CommonHttpTests(unittest.IsolatedAsyncioTestCase):
             value = await client.post_state(payload)
             self.assertEqual(value, {"status": "ok"})
             fake_async_client.post.assert_awaited_once_with(
-                "http://127.0.0.1:8712/v1/state", json=payload
+                "http://127.0.0.1:8712/v1/state", json=payload, headers=None
             )
             await client.aclose()
             fake_async_client.aclose.assert_awaited_once()
+
+    def test_client_uses_write_token_header_when_configured(self) -> None:
+        fake_httpx_client = mock.Mock()
+        fake_httpx_client.get.return_value = _FakeResponse({"ok": True})
+
+        with (
+            mock.patch("httpx.Client", return_value=fake_httpx_client),
+            mock.patch.dict(
+                os.environ, {"ACTIVEWATCHER_WRITE_TOKEN": "top-secret"}, clear=False
+            ),
+        ):
+            client = ActiveWatcherClient("http://127.0.0.1:8712")
+            value = client.get_json("/v1/test")
+            self.assertEqual(value, {"ok": True})
+            fake_httpx_client.get.assert_called_once_with(
+                "http://127.0.0.1:8712/v1/test",
+                params=None,
+                headers={"X-ActiveWatcher-Token": "top-secret"},
+            )
+            client.close()
+
+    async def test_async_client_uses_write_token_header_when_configured(self) -> None:
+        fake_async_client = mock.AsyncMock()
+        fake_async_client.post.return_value = _FakeResponse({"status": "ok"})
+
+        with (
+            mock.patch("httpx.AsyncClient", return_value=fake_async_client),
+            mock.patch.dict(
+                os.environ, {"ACTIVEWATCHER_WRITE_TOKEN": "top-secret"}, clear=False
+            ),
+        ):
+            client = ActiveWatcherAsyncClient("http://127.0.0.1:8712")
+            payload = {
+                "bucket": "window",
+                "source": "src",
+                "ts": "2026-01-01T00:00:00Z",
+                "data": {},
+            }
+            await client.post_state(payload)
+            fake_async_client.post.assert_awaited_once_with(
+                "http://127.0.0.1:8712/v1/state",
+                json=payload,
+                headers={"X-ActiveWatcher-Token": "top-secret"},
+            )
+            await client.aclose()
 
     def test_missing_httpx_dependency_raises_runtime_error(self) -> None:
         real_import = builtins.__import__

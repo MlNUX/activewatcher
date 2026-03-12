@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+import ipaddress
 import os
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
@@ -88,24 +91,54 @@ def _trusted_hosts() -> list[str]:
     return out or defaults
 
 
+def _write_auth_token() -> str:
+    return app_config.default_write_token()
+
+
+def _extract_write_token(
+    *, x_activewatcher_token: str | None, authorization: str | None
+) -> str:
+    header_token = str(x_activewatcher_token or "").strip()
+    if header_token:
+        return header_token
+    raw_auth = str(authorization or "").strip()
+    if raw_auth.lower().startswith("bearer "):
+        return raw_auth[7:].strip()
+    return ""
+
+
+def _is_loopback_client_host(host: str) -> bool:
+    raw = str(host or "").strip().lower()
+    if not raw:
+        return False
+    if raw in {"localhost", "[::1]", "::1", "127.0.0.1", "testclient"}:
+        return True
+    try:
+        return ipaddress.ip_address(raw).is_loopback
+    except ValueError:
+        return False
+
+
 def create_app(db_path: str | Path) -> FastAPI:
-    app = FastAPI(title="activewatcher", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        conn = db.connect(db_path)
+        try:
+            db.init_db(conn)
+        finally:
+            conn.close()
+        yield
+
+    app = FastAPI(title="activewatcher", version="0.1.0", lifespan=lifespan)
+    required_write_token = _write_auth_token()
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts())
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_allow_origins(),
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "X-ActiveWatcher-Token", "Authorization"],
     )
-
-    @app.on_event("startup")
-    def _startup() -> None:
-        conn = db.connect(db_path)
-        try:
-            db.init_db(conn)
-        finally:
-            conn.close()
 
     def _get_conn():
         conn = db.connect(db_path)
@@ -113,6 +146,30 @@ def create_app(db_path: str | Path) -> FastAPI:
             yield conn
         finally:
             conn.close()
+
+    def _require_write_access(
+        request: Request,
+        x_activewatcher_token: str | None = Header(
+            default=None, alias="X-ActiveWatcher-Token"
+        ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
+    ) -> None:
+        if not required_write_token:
+            client_host = str(getattr(request.client, "host", "") or "")
+            if client_host and not _is_loopback_client_host(client_host):
+                raise HTTPException(
+                    status_code=403,
+                    detail="write access is limited to local clients",
+                )
+            return
+        provided = _extract_write_token(
+            x_activewatcher_token=x_activewatcher_token,
+            authorization=authorization,
+        )
+        if not provided or not secrets.compare_digest(provided, required_write_token):
+            raise HTTPException(
+                status_code=401, detail="missing or invalid write token"
+            )
 
     frontend_dist = _frontend_dist_dir()
     frontend_index = frontend_dist / "index.html"
@@ -183,7 +240,11 @@ def create_app(db_path: str | Path) -> FastAPI:
         return _ui_response()
 
     @app.post("/v1/state")
-    def post_state(state: StateEvent, conn=Depends(_get_conn)) -> dict[str, Any]:
+    def post_state(
+        state: StateEvent,
+        _auth=Depends(_require_write_access),
+        conn=Depends(_get_conn),
+    ) -> dict[str, Any]:
         try:
             result = ingest.ingest_state(conn, state)
         except ingest.NonMonotonicTimestampError as e:
@@ -211,18 +272,27 @@ def create_app(db_path: str | Path) -> FastAPI:
         source: str | None = Query(None),
         from_ts: str | None = Query(None, alias="from"),
         to_ts: str | None = Query(None, alias="to"),
+        limit: int = Query(5000, ge=1, le=50000),
+        cursor: int = Query(0, ge=0),
         conn=Depends(_get_conn),
     ) -> dict[str, Any]:
         now = utcnow()
         to_dt = _parse_dt_param(to_ts, default=now)
         from_dt = _parse_dt_param(from_ts, default=(to_dt - timedelta(hours=24)))
-        from_dt, to_dt, intervals = reports.load_intervals(
-            conn, bucket=bucket, source=source, from_ts=from_dt, to_ts=to_dt
+        from_dt, to_dt, intervals, next_cursor = reports.load_intervals_limited(
+            conn,
+            bucket=bucket,
+            source=source,
+            from_ts=from_dt,
+            to_ts=to_dt,
+            limit=limit,
+            cursor=cursor,
         )
         return {
             "from_ts": reports.to_rfc3339(from_dt),
             "to_ts": reports.to_rfc3339(to_dt),
             "events": [i.to_json() for i in intervals],
+            "next_cursor": next_cursor,
         }
 
     @app.get("/v1/summary")
@@ -297,7 +367,11 @@ def create_app(db_path: str | Path) -> FastAPI:
         return timers.list_timers(conn)
 
     @app.post("/v1/timers")
-    def post_timer(payload: dict[str, Any], conn=Depends(_get_conn)) -> dict[str, Any]:
+    def post_timer(
+        payload: dict[str, Any],
+        _auth=Depends(_require_write_access),
+        conn=Depends(_get_conn),
+    ) -> dict[str, Any]:
         try:
             timer = timers.create_timer(
                 conn,
@@ -310,7 +384,11 @@ def create_app(db_path: str | Path) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e)) from e
 
     @app.post("/v1/timers/{timer_id}/start")
-    def post_timer_start(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+    def post_timer_start(
+        timer_id: int,
+        _auth=Depends(_require_write_access),
+        conn=Depends(_get_conn),
+    ) -> dict[str, Any]:
         try:
             timer = timers.start_timer(conn, timer_id=timer_id)
             return {"status": "ok", "timer": timer}
@@ -318,7 +396,11 @@ def create_app(db_path: str | Path) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.post("/v1/timers/{timer_id}/pause")
-    def post_timer_pause(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+    def post_timer_pause(
+        timer_id: int,
+        _auth=Depends(_require_write_access),
+        conn=Depends(_get_conn),
+    ) -> dict[str, Any]:
         try:
             timer = timers.pause_timer(conn, timer_id=timer_id)
             return {"status": "ok", "timer": timer}
@@ -326,7 +408,11 @@ def create_app(db_path: str | Path) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.post("/v1/timers/{timer_id}/stop")
-    def post_timer_stop(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+    def post_timer_stop(
+        timer_id: int,
+        _auth=Depends(_require_write_access),
+        conn=Depends(_get_conn),
+    ) -> dict[str, Any]:
         try:
             timer = timers.stop_timer(conn, timer_id=timer_id)
             return {"status": "ok", "timer": timer}
@@ -334,7 +420,11 @@ def create_app(db_path: str | Path) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.post("/v1/timers/{timer_id}/reactivate")
-    def post_timer_reactivate(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+    def post_timer_reactivate(
+        timer_id: int,
+        _auth=Depends(_require_write_access),
+        conn=Depends(_get_conn),
+    ) -> dict[str, Any]:
         try:
             timer = timers.reactivate_timer(conn, timer_id=timer_id)
             return {"status": "ok", "timer": timer}
@@ -342,7 +432,11 @@ def create_app(db_path: str | Path) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.post("/v1/timers/{timer_id}/delete")
-    def post_timer_delete(timer_id: int, conn=Depends(_get_conn)) -> dict[str, Any]:
+    def post_timer_delete(
+        timer_id: int,
+        _auth=Depends(_require_write_access),
+        conn=Depends(_get_conn),
+    ) -> dict[str, Any]:
         try:
             timer = timers.delete_timer(conn, timer_id=timer_id)
             return {"status": "ok", "timer": timer}
@@ -386,7 +480,9 @@ def create_app(db_path: str | Path) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e)) from e
 
     @app.post("/v1/autotag/review-gate/approve")
-    def post_autotag_review_gate_approve(payload: dict[str, Any]) -> dict[str, Any]:
+    def post_autotag_review_gate_approve(
+        payload: dict[str, Any], _auth=Depends(_require_write_access)
+    ) -> dict[str, Any]:
         run_id = str(payload.get("run_id") or "").strip()
         approved_by = str(payload.get("approved_by") or "").strip()
         allowed_drop_ids_raw = payload.get("allowed_category_drop_ids")
