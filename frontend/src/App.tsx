@@ -417,6 +417,20 @@ function parseLocalDateKey(v: string | null | undefined): Date | null {
   return parsed;
 }
 
+function normalizeDayKey(v: string | null | undefined): string | null {
+  const parsed = parseLocalDateKey(v);
+  if (!parsed) return null;
+
+  const day = startOfLocalDay(parsed);
+  const today = startOfLocalDay(new Date());
+  if (day.getTime() > today.getTime()) return formatLocalDateKey(today);
+  return formatLocalDateKey(day);
+}
+
+function currentDayKey(): string {
+  return formatLocalDateKey(new Date());
+}
+
 function normalizeWeekStartKey(v: string | null | undefined): string | null {
   const parsed = parseLocalDateKey(v);
   if (!parsed) return null;
@@ -932,11 +946,27 @@ async function resolveWindow(
   dayWindowMode: DayWindowMode,
   page: PageId,
   apiBase: string,
+  statsDayKey: string,
   statsWeekStart: string,
   statsMonthKey: string
 ): Promise<TimeWindow> {
   const to = nowIso();
   if (range === "24h") {
+    if (page === "stats" && dayWindowMode === "midnight") {
+      const now = new Date();
+      const today = startOfLocalDay(now);
+      const selectedDate = parseLocalDateKey(statsDayKey);
+      let fromLocal = startOfLocalDay(selectedDate || now);
+      if (fromLocal.getTime() > today.getTime()) {
+        fromLocal = today;
+      }
+
+      const dayEnd = new Date(fromLocal.getTime());
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      const toDate = now.getTime() < dayEnd.getTime() ? now : dayEnd;
+      return { from: fromLocal.toISOString(), to: toDate.toISOString() };
+    }
+
     if (dayWindowMode === "midnight") {
       const now = new Date();
       const fromLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1858,9 +1888,11 @@ function LegacyTimeline({
 
   const avgActivePct =
     entries.length > 0 ? entries.reduce((sum, e) => sum + e.activePct, 0) / entries.length : 0;
-  const peak = entries.reduce((best, e) => (best == null || e.activePct > best.activePct ? e : best), null as
+  const avgActiveHours = entries.length > 0 ? entries.reduce((sum, e) => sum + e.active, 0) / entries.length / 3600 : 0;
+  const peak = entries.reduce((best, e) => (best == null || e.active > best.active ? e : best), null as
     | (typeof entries)[number]
     | null);
+  const peakActiveHours = peak ? peak.active / 3600 : 0;
 
   const labelText = (start: string): string => {
     const d = new Date(start);
@@ -1934,8 +1966,7 @@ function LegacyTimeline({
         </div>
       </div>
       <div className="sub timelineInfoLegacy">
-        {infoBase} · avg {Math.round(avgActivePct * 10) / 10}% · peak{" "}
-        {peak ? Math.round(peak.activePct * 10) / 10 : 0}%
+        {infoBase} · avg {fmtHours(avgActiveHours)} · peak {fmtHours(peakActiveHours)}
       </div>
       <div className="timelineWrapLegacy">
         <div className="timelineAxisLegacy" aria-hidden="true">
@@ -1997,12 +2028,14 @@ export default function App() {
   const initialTopic = parseTopicId(searchParams.get("topic"));
   const initialDayWindowMode =
     page === "dashboard" ? "midnight" : parseDayWindowMode(searchParams.get("day_window"));
+  const initialStatsDayKey = normalizeDayKey(searchParams.get("day")) || currentDayKey();
   const initialStatsWeekStart = normalizeWeekSelectionKey(searchParams.get("week_start")) || currentWeekStartKey();
   const initialStatsMonthKey = normalizeMonthKey(searchParams.get("month")) || currentMonthKey();
 
   const [range, setRange] = useState<RangeKey>(initialRange);
   const [topic, setTopic] = useState<TopicId>(initialTopic);
   const [dayWindowMode, setDayWindowMode] = useState<DayWindowMode>(initialDayWindowMode);
+  const [statsDayKey, setStatsDayKey] = useState(initialStatsDayKey);
   const [statsWeekStart, setStatsWeekStart] = useState(initialStatsWeekStart);
   const [statsMonthKey, setStatsMonthKey] = useState(initialStatsMonthKey);
   const [monitorSetupFilter, setMonitorSetupFilter] = useState<MonitorSetupFilter>("all");
@@ -2089,6 +2122,7 @@ export default function App() {
     topic: TopicId;
     range: RangeKey;
     dayWindowMode: DayWindowMode;
+    statsDayKey: string;
     statsWeekStart: string;
     statsMonthKey: string;
     reloadKey: number;
@@ -2100,6 +2134,7 @@ export default function App() {
     nextRange: RangeKey,
     nextTopic: TopicId,
     nextDayWindowMode: DayWindowMode,
+    nextStatsDayKey: string,
     nextStatsWeekStart: string,
     nextStatsMonthKey: string
   ): void {
@@ -2109,6 +2144,8 @@ export default function App() {
     else params.delete("topic");
     if (nextRange === "24h" && nextDayWindowMode === "midnight") params.set("day_window", "midnight");
     else params.delete("day_window");
+    if (page === "stats" && nextRange === "24h" && nextDayWindowMode === "midnight") params.set("day", nextStatsDayKey);
+    else params.delete("day");
     if (page === "stats" && nextRange === "1w") params.set("week_start", nextStatsWeekStart);
     else params.delete("week_start");
     if (page === "stats" && nextRange === "1m") params.set("month", nextStatsMonthKey);
@@ -2120,30 +2157,36 @@ export default function App() {
 
   function onRangeChange(next: RangeKey): void {
     setRange(next);
-    replaceQuery(next, topic, dayWindowMode, statsWeekStart, statsMonthKey);
+    replaceQuery(next, topic, dayWindowMode, statsDayKey, statsWeekStart, statsMonthKey);
   }
 
   function onTopicChange(next: TopicId): void {
     setTopic(next);
-    replaceQuery(range, next, dayWindowMode, statsWeekStart, statsMonthKey);
+    replaceQuery(range, next, dayWindowMode, statsDayKey, statsWeekStart, statsMonthKey);
   }
 
   function onDayWindowModeChange(next: DayWindowMode): void {
     setDayWindowMode(next);
-    replaceQuery(range, topic, next, statsWeekStart, statsMonthKey);
+    replaceQuery(range, topic, next, statsDayKey, statsWeekStart, statsMonthKey);
+  }
+
+  function onStatsDayChange(next: string): void {
+    const normalized = normalizeDayKey(next) || currentDayKey();
+    setStatsDayKey(normalized);
+    replaceQuery(range, topic, dayWindowMode, normalized, statsWeekStart, statsMonthKey);
   }
 
   function onStatsWeekChange(next: string): void {
     const normalized = normalizeWeekSelectionKey(next);
     if (!normalized) return;
     setStatsWeekStart(normalized);
-    replaceQuery(range, topic, dayWindowMode, normalized, statsMonthKey);
+    replaceQuery(range, topic, dayWindowMode, statsDayKey, normalized, statsMonthKey);
   }
 
   function onStatsMonthChange(next: string): void {
     const normalized = normalizeMonthKey(next) || currentMonthKey();
     setStatsMonthKey(normalized);
-    replaceQuery(range, topic, dayWindowMode, statsWeekStart, normalized);
+    replaceQuery(range, topic, dayWindowMode, statsDayKey, statsWeekStart, normalized);
   }
 
   function hrefFor(target: PageId): string {
@@ -2151,6 +2194,7 @@ export default function App() {
     params.set("range", range);
     if (target === "stats") params.set("topic", topic);
     if (range === "24h" && dayWindowMode === "midnight") params.set("day_window", "midnight");
+    if (target === "stats" && range === "24h" && dayWindowMode === "midnight") params.set("day", statsDayKey);
     if (target === "stats" && range === "1w") params.set("week_start", statsWeekStart);
     if (target === "stats" && range === "1m") params.set("month", statsMonthKey);
     const qs = params.toString();
@@ -2213,6 +2257,7 @@ export default function App() {
       previousLoad.topic === topic &&
       previousLoad.range === range &&
       previousLoad.dayWindowMode === dayWindowMode &&
+      previousLoad.statsDayKey === statsDayKey &&
       previousLoad.statsWeekStart === statsWeekStart &&
       previousLoad.statsMonthKey === statsMonthKey &&
       previousLoad.reloadKey === reloadKey &&
@@ -2229,6 +2274,7 @@ export default function App() {
       topic,
       range,
       dayWindowMode,
+      statsDayKey,
       statsWeekStart,
       statsMonthKey,
       reloadKey,
@@ -2250,7 +2296,15 @@ export default function App() {
         let summaryQuery = "";
         if (!(requested.size === 1 && requested.has("autotag"))) {
           const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
-          const timeWindow = await resolveWindow(range, effectiveDayWindowMode, page, apiBase, statsWeekStart, statsMonthKey);
+          const timeWindow = await resolveWindow(
+            range,
+            effectiveDayWindowMode,
+            page,
+            apiBase,
+            statsDayKey,
+            statsWeekStart,
+            statsMonthKey
+          );
           if (cancelled || loadId !== activeLoadId) return;
           setWindowRange(timeWindow);
 
@@ -2477,7 +2531,7 @@ export default function App() {
       cancelled = true;
       if (timer != null) window.clearInterval(timer);
     };
-  }, [page, topic, range, dayWindowMode, statsWeekStart, statsMonthKey, reloadKey, autotagRunId, apiBase]);
+  }, [page, topic, range, dayWindowMode, statsDayKey, statsWeekStart, statsMonthKey, reloadKey, autotagRunId, apiBase]);
 
   useEffect(() => {
     const runId = String(autotagGenerated?.run_id || "");
@@ -3665,17 +3719,27 @@ export default function App() {
   const statusBadge = page === "settings" ? "settings" : loading ? "syncing" : error ? "degraded" : "healthy";
   const effectiveDayWindowMode = page === "dashboard" ? "midnight" : dayWindowMode;
   const showTodayNowMarker = page === "dashboard" && range === "24h" && effectiveDayWindowMode === "midnight";
+  const selectedStatsDayStart = startOfLocalDay(parseLocalDateKey(statsDayKey) || new Date());
   const selectedStatsWeekStart = startOfLocalWeek(parseLocalDateKey(statsWeekStart) || new Date());
   const selectedStatsMonthStart = startOfLocalMonth(parseLocalMonthKey(statsMonthKey) || new Date());
+  const statsDayInputValue = formatLocalDateKey(selectedStatsDayStart);
+  const statsDayInputMax = currentDayKey();
+  const statsDayLabel = selectedStatsDayStart.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
   const statsWeekInputValue = formatLocalWeekKey(selectedStatsWeekStart);
   const statsWeekInputMax = formatLocalWeekKey(new Date());
   const statsWeekLabel = weekRangeLabel(selectedStatsWeekStart);
   const statsMonthLabel = monthRangeLabel(selectedStatsMonthStart);
   const rangeLabel =
     range === "24h"
-      ? effectiveDayWindowMode === "midnight"
-        ? "24h (00:00 -> jetzt)"
-        : "24h (-24h -> jetzt)"
+      ? page === "stats" && effectiveDayWindowMode === "midnight"
+        ? `24h (${statsDayLabel})`
+        : effectiveDayWindowMode === "midnight"
+          ? "24h (00:00 -> jetzt)"
+          : "24h (-24h -> jetzt)"
       : page === "stats" && range === "1w"
         ? `1w (${statsWeekLabel})`
       : page === "stats" && range === "1m"
@@ -3739,6 +3803,18 @@ export default function App() {
                   {mode.label}
                 </button>
               ))}
+            </div>
+          ) : null}
+          {page === "stats" && range === "24h" && dayWindowMode === "midnight" ? (
+            <div className="controls" style={{ marginTop: 7 }}>
+              <input
+                type="date"
+                className="timersSelect statsCalendarInput"
+                value={statsDayInputValue}
+                max={statsDayInputMax}
+                onChange={(e) => onStatsDayChange(e.target.value)}
+                aria-label="stats day"
+              />
             </div>
           ) : null}
           {page === "stats" && range === "1w" ? (
